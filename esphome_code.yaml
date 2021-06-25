@@ -1,0 +1,117 @@
+logger:
+  level: WARN 
+
+
+globals:
+  - id: enable_magnetometer_serial_output
+    type: bool
+    restore_value: no
+    initial_value: 'false' 
+
+i2c:
+   - id: bus_a
+     sda: GPIO21
+     scl: GPIO22
+     scan: False #True only if hmc5883l not detected at address 0x1E
+     #frequency: 100kHz (max 400 kHz for hmc5883l)
+
+sensor:      
+    
+    #https://esphome.io/components/sensor/hmc5883l.html?highlight=hmc5883
+    #I2C connected : SDA (GPIO21) and SCL (GPIO22)
+  - platform: hmc5883l
+    address: 0x1E
+    field_strength_x:
+      name: "HMC5883L Field Strength X"
+      #internal: true
+      id: hmc5883l_x   
+    field_strength_y:
+      name: "HMC5883L Field Strength Y"
+      #internal: true
+      id: hmc5883l_y
+    field_strength_z:
+      name: "HMC5883L Field Strength Z"
+      #internal: true
+      id: hmc5883l_z
+    heading:
+      name: "${friendly_name} wind heading"
+      id: hmc5883l_heading
+      filters:
+      - lambda: |-
+            if(x < 0){ return x +360;}
+            else{return x;}
+    oversampling: 8x #1x
+    range: 810uT #Supported values are 88µT, 130µT, 190µT, 250µT, 400µT, 470µT, 560µT, 810µT. Default range is ±130µT.
+    update_interval: 1s #max 160Hz=6.25 ms but that component cannot be under 1s
+    id: meteo_station_HMC5883L_magnetometer
+    
+    
+  - platform: template
+    name: "${friendly_name} true heading" 
+    unit_of_measurement: '°'
+    lambda: |-
+        
+        // Taken from calibrate.py or magcal
+        float hard_iron_bias_x =  41.45884154873271 ;
+        float hard_iron_bias_y =  -87.79628696573607 ;
+        float hard_iron_bias_z =  569.4171225039286 ;
+
+
+        double soft_iron_bias_xx =  0.5823136909144911 ;
+        double soft_iron_bias_xy =  0.007124620314368133 ;
+        double soft_iron_bias_xz =  -0.024442807568982334 ;
+
+
+        double soft_iron_bias_yx =  0.00712462031436818 ;
+        double soft_iron_bias_yy =  0.5906868599676302 ;
+        double soft_iron_bias_yz =  0.005356720947343228 ;
+
+
+        double soft_iron_bias_zx =  -0.024442807568982372 ;
+        double soft_iron_bias_zy =  0.005356720947343263 ;
+        double soft_iron_bias_zz =  0.7210550285247264 ;
+        
+        // get values x,y,z and subtract the hard iron offset
+        float xm_off = id(hmc5883l_x).state - hard_iron_bias_x;
+        float ym_off = id(hmc5883l_y).state - hard_iron_bias_y;
+        float zm_off = id(hmc5883l_z).state - hard_iron_bias_z;
+        
+        // multiply by the inverse soft iron offset 
+        float xm_cal = xm_off *  soft_iron_bias_xx + ym_off *  soft_iron_bias_yx  + zm_off *  soft_iron_bias_zx;
+        float ym_cal = xm_off *  soft_iron_bias_xy + ym_off *  soft_iron_bias_yy + zm_off *  soft_iron_bias_zy;
+        //not needed : float zm_cal = xm_off *  soft_iron_bias_xz + ym_off *  soft_iron_bias_yz  + zm_off *  soft_iron_bias_zz;
+        
+        //float heading = atan2(ym_cal, xm_cal);
+        float heading = atan2(0 - xm_cal, ym_cal);
+        
+        //heading += id(magnetic_declination); 
+        
+        if(id(enable_magnetometer_serial_output) == true){
+        ESP_LOGD("main", "%.1f,%.1f,%.1f", id(hmc5883l_x).state, id(hmc5883l_y).state, id(hmc5883l_z).state);
+        }
+        // Correct for when signs are reversed.
+        if (heading < 0) {
+        heading += 2*PI;
+        }
+        // Check for wrap due to addition of declination.
+        if (heading > 2*PI) {
+        //heading -= 2*PI;
+        }
+        float headingDegrees = heading * 180/M_PI; // Convert radians to degrees.
+        return headingDegrees;
+    update_interval: 1s
+    id: meteo_station_wind_true_heading 
+ 
+switch: 
+  - platform: template
+    name: "Toogle magnetometer serial output"
+    turn_on_action:
+      - script.execute: toogle_magnetometer_serial_output    
+
+
+script:
+  - id: toogle_magnetometer_serial_output
+    then:
+         - lambda: |-
+                      ESP_LOGD("main", "toogle magnetometer calibration output");
+                      id(enable_magnetometer_serial_output) = !id(enable_magnetometer_serial_output) ;
