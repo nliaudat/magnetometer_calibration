@@ -37,7 +37,7 @@ class Magnetometer(object):
      references :
         -  https://teslabs.com/articles/magnetometer-calibration/      
         -  https://www.best-microcontroller-projects.com/hmc5883l.html
-        -  https://www.best-microcontroller-projects.com/hmc5883l.html     
+
     '''
     MField = 110
 
