@@ -2,6 +2,8 @@
 
 Ellipsoid fitting using python numpy to calibrate magnetometers
 
+![alt text](https://github.com/nliaudat/magnetometer_calibration/blob/main/Figure_1.png "Output")
+
 
 # Usage :
 1) output you raw data from sensor and name it mag_out.txt in format x,y,z (uT)
