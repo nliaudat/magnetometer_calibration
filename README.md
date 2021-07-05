@@ -1,4 +1,4 @@
-# magnetometer calibration
+# Magnetometer calibration
 
 Ellipsoid fitting using python numpy to calibrate magnetometers
 
