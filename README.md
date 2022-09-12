@@ -62,7 +62,11 @@ Ellipsoid fitting using python numpy to calibrate magnetometers
         return headingDegrees;
 
 ---
-If you run esphome, a sample code is included
+If you run [esphome](https://esphome.io), a [sample code is included](https://github.com/nliaudat/magnetometer_calibration/blob/main/esphome_code.yaml) to output raw data and get corrected values.
+
+# Working demo
+
+If you want a sample or a working demo, look at https://github.com/nliaudat/weatherstation
 
 # Requirements : 
 calibrate.py requires numpy,scipy and optional matplotlib to plot the graph
