@@ -79,4 +79,7 @@ The script seems to work perfectly for horizontal use, but there is still a bug.
 ## Sources :
         -  https://teslabs.com/articles/magnetometer-calibration/      
         -  https://www.best-microcontroller-projects.com/hmc5883l.html
+        
+# Thanks : 
+[John zhang12300](https://github.com/zhang12300) for issuing the bug
 
