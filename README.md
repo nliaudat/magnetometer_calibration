@@ -75,11 +75,11 @@ calibrate.py requires numpy,scipy and optional matplotlib to plot the graph
 Look at [issue #1](https://github.com/nliaudat/magnetometer_calibration/issues/1)
 
 The script seems to work perfectly for horizontal use, but there is still a bug.
+      
+# Thanks : 
+[John zhang12300](https://github.com/zhang12300) for issuing the bug
 
 ## Sources :
         -  https://teslabs.com/articles/magnetometer-calibration/      
         -  https://www.best-microcontroller-projects.com/hmc5883l.html
-        
-# Thanks : 
-[John zhang12300](https://github.com/zhang12300) for issuing the bug
 
