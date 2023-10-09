@@ -2,12 +2,13 @@ import numpy as np
 from scipy import linalg
 from matplotlib import pyplot as plt
 
-
-
+ #https://github.com/nliaudat/magnetometer_calibration/blob/main/calibrate.py
+ #corrected code S. James Remington
+ 
 class Magnetometer(object):
     
     '''
-        To obtain Gravitation Field (raw format):
+	To obtain Gravitation Field (raw format):
     1) get the Total Field for your location from here:
        http://www.ngdc.noaa.gov/geomag-web (tab Magnetic Field)
        es. Total Field = 47,241.3 nT | my val :47'789.7
@@ -33,13 +34,14 @@ class Magnetometer(object):
             5.6 Ga => 330
             8.1 Ga => 230 
         -----------------------------------------------
-
+	
+	
      references :
         -  https://teslabs.com/articles/magnetometer-calibration/      
         -  https://www.best-microcontroller-projects.com/hmc5883l.html
 
     '''
-    MField = 110
+    MField = 1000
 
     def __init__(self, F=MField): 
 
@@ -50,7 +52,7 @@ class Magnetometer(object):
         self.A_1 = np.eye(3)
         
     def run(self):
-        data = np.loadtxt("mag_out.txt",delimiter=',')
+        data = np.loadtxt("mag3_raw.csv",delimiter=',')
         print("shape of data:",data.shape)
         #print("datatype of data:",data.dtype)
         print("First 5 rows raw:\n", data[:5])
@@ -71,15 +73,16 @@ class Magnetometer(object):
         print("Hard iron bias:\n", self.b)
 
         plt.rcParams["figure.autolayout"] = True
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(data[:,0], data[:,1], data[:,2], marker='o', color='r')
+        #fig = plt.figure()
+        #ax = fig.add_subplot(111, projection='3d')
+        #ax.scatter(data[:,0], data[:,1], data[:,2], marker='o', color='r')
+		#plt.show()
 
         result = [] 
         for row in data: 
         
             # subtract the hard iron offset
-            xm_off = row[0]-self.b[0]
+            xm_off  = row[0]-self.b[0]
             ym_off  = row[1]-self.b[1]
             zm_off  = row[2]-self.b[2]
             
@@ -92,7 +95,8 @@ class Magnetometer(object):
             #result_hard_iron_bias = np.append(result, np.array([xm_off, ym_off, zm_off]) )
 
         result = result.reshape(-1, 3)
-        
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
         ax.scatter(result[:,0], result[:,1], result[:,2], marker='o', color='g')
         plt.show()
         
@@ -102,21 +106,21 @@ class Magnetometer(object):
         print("*************************" )        
         print("code to paste : " )
         print("*************************" )  
-        print("float hard_iron_bias_x = ", float(self.b[0]), ";")
-        print("float hard_iron_bias_y = " , float(self.b[1]), ";")
-        print("float hard_iron_bias_z = " , float(self.b[2]), ";")
+        print("float hard_iron_bias_x = ", self.b[0], ";")
+        print("float hard_iron_bias_y = ", self.b[1], ";")
+        print("float hard_iron_bias_z = ", self.b[2], ";")
         print("\n")
-        print("double soft_iron_bias_xx = " , float(self.A_1[0,0]), ";")
-        print("double soft_iron_bias_xy = " , float(self.A_1[1,0]), ";")
-        print("double soft_iron_bias_xz = " , float(self.A_1[2,0]), ";")
+        print("double soft_iron_bias_xx = ", self.A_1[0,0], ";")
+        print("double soft_iron_bias_xy = ", self.A_1[1,0], ";")
+        print("double soft_iron_bias_xz = ", self.A_1[2,0], ";")
         print("\n")
-        print("double soft_iron_bias_yx = " , float(self.A_1[0,1]), ";")
-        print("double soft_iron_bias_yy = " , float(self.A_1[1,1]), ";")
-        print("double soft_iron_bias_yz = " , float(self.A_1[2,1]), ";")
+        print("double soft_iron_bias_yx = ", self.A_1[0,1], ";")
+        print("double soft_iron_bias_yy = ", self.A_1[1,1], ";")
+        print("double soft_iron_bias_yz = ", self.A_1[2,1], ";")
         print("\n")
-        print("double soft_iron_bias_zx = " , float(self.A_1[0,2]), ";")
-        print("double soft_iron_bias_zy = " , float(self.A_1[1,2]), ";")
-        print("double soft_iron_bias_zz = " , float(self.A_1[2,2]), ";")
+        print("double soft_iron_bias_zx = ", self.A_1[0,2], ";")
+        print("double soft_iron_bias_zy = ", self.A_1[1,2], ";")
+        print("double soft_iron_bias_zz = ", self.A_1[2,2], ";")
         print("\n")
 
 
@@ -173,10 +177,10 @@ class Magnetometer(object):
         # v_2 (eq. 13, solution)
         v_2 = np.dot(np.dot(-np.linalg.inv(S_22), S_21), v_1)
 
-        # quadric-form parameters
-        M = np.array([[v_1[0], v_1[3], v_1[4]],
-                      [v_1[3], v_1[1], v_1[5]],
-                      [v_1[4], v_1[5], v_1[2]]])
+        # quadratic-form parameters, parameters h and f swapped as per correction by Roger R on Teslabs page
+        M = np.array([[v_1[0], v_1[5], v_1[4]],
+                      [v_1[5], v_1[1], v_1[3]],
+                      [v_1[4], v_1[3], v_1[2]]])
         n = np.array([[v_2[0]],
                       [v_2[1]],
                       [v_2[2]]])
