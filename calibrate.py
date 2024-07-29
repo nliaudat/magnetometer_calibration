@@ -41,7 +41,7 @@ class Magnetometer(object):
         -  https://www.best-microcontroller-projects.com/hmc5883l.html
 
     '''
-    MField = 1000
+    MField = 1000 #Gravitation Field : TO CHANGE according the previous formula
 
     def __init__(self, F=MField): 
 
