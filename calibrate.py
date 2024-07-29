@@ -52,7 +52,7 @@ class Magnetometer(object):
         self.A_1 = np.eye(3)
         
     def run(self):
-        data = np.loadtxt("mag3_raw.csv",delimiter=',')
+        data = np.loadtxt("mag_out.txt",delimiter=',')
         print("shape of data:",data.shape)
         #print("datatype of data:",data.dtype)
         print("First 5 rows raw:\n", data[:5])
