@@ -14,10 +14,7 @@ perform calibration, apply existing calibrations, and visualize results.
 # Usage :
 1) output you raw data from sensor and name it `mag_out.txt` in format x,y,z (uT) or in a csv file
 
-2) optionally set the MField Value:
-get the Total Field for your location from here:
-http://www.ngdc.noaa.gov/geomag-web (tab Magnetic Field)
- es. Total Field = 47,241.3 nT | my val :47'789.7
+2) optionally set the MField Value according to [Gravitation_Field.md](https://github.com/nliaudat/magnetometer_calibration/blob/main/Gravitation_Field.md)
 
 and use `--field` flag
 
@@ -96,6 +93,8 @@ calibrate.py requires numpy,scipy, pandas and optional matplotlib to plot the gr
 [John zhang12300](https://github.com/zhang12300) for issuing the bug
 
 [jremington](https://github.com/jremington) for fixing the bug
+
+[domsl](https://github.com/domsl) for improvements in PR#5
 
 ## Sources :
         -  https://teslabs.com/articles/magnetometer-calibration/      
