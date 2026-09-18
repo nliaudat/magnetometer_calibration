@@ -151,6 +151,10 @@ def check_offline_copy():
         current = handle.read()
     if render_app(sample) == current:
         return True, "%d kB, identical to a fresh build" % (os.path.getsize(committed) // 1024)
+    # The file is generated on one platform and checked on another (and git may hand out CRLF in
+    # one place and LF in the other), so compare the content, not the line endings.
+    if render_app(sample).replace("\r\n", "\n") == current.replace("\r\n", "\n"):
+        return True, "%d kB, identical to a fresh build" % (os.path.getsize(committed) // 1024)
     return False, "stale - run `python tools/build_site.py`"
 
 
