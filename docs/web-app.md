@@ -167,19 +167,23 @@ than the CLI's own cross-machine drift, and invisible at the six decimals the C 
 ## Validating the port
 
 ```bash
-python tools/dump_golden.py --check     # calibrate.py must still reproduce the fixture
 python tools/build_site.py              # site/ + the committed magcal.html at the repo root
 python tools/run_web_tests.py --all     # every check: HTTP, file://, offline bundle, offline copy
 node --test web/tests                   # the same assertions under Node, as CI runs them
+
+# maintainer tools, deliberately not CI gates:
+python tools/dump_golden.py --check     # do the recorded expectations still match calibrate.py?
 python tools/compare_fit_routes.py      # re-measure the routes against calibrate.py
 ```
 
-The fixture holds the bundled capture, six seeded synthetic sweeps, the documented rejection
-cases, a `printf` battery - including exact decimal ties, where C rounds half to even and
-JavaScript's `toFixed` does not - and the C / JSON blocks rendered by `calibrate.py`'s own
-printers. `tools/dump_golden.py` rewrites the sections it can regenerate and carries the rest
-over; CI runs it with `--check`, so a change on either side fails the build instead of drifting
-quietly.
+`web/tests/golden/python-golden.json` is **committed**, and the assertions run against that file:
+both runners compare the JavaScript with it at 1e-6, and `--all` re-checks the app end to end
+(including the sample button, the `file://` banners and the offline bundle). `tools/dump_golden.py`
+is how the fixture was produced, and how it is regenerated after changing `calibrate.py` - it is
+*not* a CI gate, because the fit's last digits move with the numpy/LAPACK build (the same reason
+the old test suite used banded tolerances for its golden numbers). CI therefore gates on the
+committed fixture: a change in the JavaScript or in the app's wiring fails the build, a different
+BLAS does not.
 
 ## Publishing
 
