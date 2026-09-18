@@ -11,6 +11,22 @@ perform calibration, apply existing calibrations, and visualize results.
 
 
 
+# Web app
+
+The same calibration runs in your browser — no install, nothing uploaded, and the same
+algorithm as `calibrate.py`:
+
+* **<https://nliaudat.github.io/magnetometer_calibration/>** (drop in a capture, read the quality
+  report, copy the C code / JSON / ESPHome lambda, download the patched YAML);
+* **`magcal.html`** — one self-contained file in this repository: double-click it, no server and
+  no Python needed.
+
+The port is validated against `calibrate.py` itself: `tools/dump_golden.py` records what the
+Python tool computes and `web/tests` checks the JavaScript against it — see
+[docs/web-app.md](docs/web-app.md). Locally, `python tools/serve.py --open` serves both the
+sources and the built site (double-clicking `web/index.html` cannot work: browsers block ES
+modules for `file://` pages).
+
 # Usage :
 1) output you raw data from sensor and name it `mag_out.txt` in format x,y,z (uT) or in a csv file
 
@@ -30,25 +46,27 @@ Example Usage:
 
 
 
-       // Taken from calibrate.py or magcal
-        float hard_iron_bias_x =  41.45884154873271 ;
-        float hard_iron_bias_y =  -87.79628696573607 ;
-        float hard_iron_bias_z =  569.4171225039286 ;
+       // Taken from calibrate.py, run on the bundled mag_out_sample.txt with --field 515
+       // (the 2021 script printed different soft iron values: it had the v1 index bug that
+       // was fixed in commit 61f5ab1, see issue #1)
+        float hard_iron_bias_x = 41.168866;
+        float hard_iron_bias_y = -89.874657;
+        float hard_iron_bias_z = 569.663929;
 
 
-        double soft_iron_bias_xx =  0.5823136909144911 ;
-        double soft_iron_bias_xy =  0.007124620314368133 ;
-        double soft_iron_bias_xz =  -0.024442807568982334 ;
+        double soft_iron_bias_xx = 2.711938;
+        double soft_iron_bias_xy = 0.027825;
+        double soft_iron_bias_xz = -0.113831;
 
 
-        double soft_iron_bias_yx =  0.00712462031436818 ;
-        double soft_iron_bias_yy =  0.5906868599676302 ;
-        double soft_iron_bias_yz =  0.005356720947343228 ;
+        double soft_iron_bias_yx = 0.027825;
+        double soft_iron_bias_yy = 2.750884;
+        double soft_iron_bias_yz = 0.029724;
 
 
-        double soft_iron_bias_zx =  -0.024442807568982372 ;
-        double soft_iron_bias_zy =  0.005356720947343263 ;
-        double soft_iron_bias_zz =  0.7210550285247264 ;
+        double soft_iron_bias_zx = -0.113831;
+        double soft_iron_bias_zy = 0.029724;
+        double soft_iron_bias_zz = 3.357968;
         
         // get values x,y,z and subtract the hard iron offset
         float xm_off = id(hmc5883l_x).state - hard_iron_bias_x;
