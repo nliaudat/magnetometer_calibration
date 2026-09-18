@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magnetometer calibration - ellipsoid fit in the browser</title>
+<meta name="description" content="Correct hard iron and soft iron distortion of a magnetometer from a raw capture. The same ellipsoid fit as the magcal command line tool, running entirely in your browser.">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header>
+  <h1>Magnetometer calibration</h1>
+  <p class="tagline">
+    Ellipsoid fitting that corrects <strong>hard iron</strong> and <strong>soft iron</strong>
+    distortion - the same algorithm as the
+    <a href="https://github.com/nliaudat/magnetometer_calibration"><code>magcal</code> command line tool</a>,
+    running entirely in your browser. <strong>Your capture is never uploaded.</strong>
+  </p>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>1 - Capture</h2>
+    <div class="dropzone" id="dropzone">
+      <p><strong>Drop a capture file here</strong></p>
+      <p class="hint">or <label class="link">choose a file
+        <input type="file" id="file-input" accept=".txt,.csv,.log,.json" hidden></label></p>
+      <p class="hint">One <code>x,y,z</code> row per line (microTesla). Comma, semicolon, tab or
+        whitespace separated, with or without a header, or raw ESPHome/serial log lines.</p>
+    </div>
+    <div class="row">
+      <button type="button" id="sample-button">Load the sample capture</button>
+      <button type="button" id="clear-button">Clear</button>
+    </div>
+    <label class="field">
+      <span>Capture text (paste or edit)</span>
+      <textarea id="capture-text" rows="7" spellcheck="false"
+        placeholder="33.1,98.3,571.2&#10;34.2,97.1,570.8"></textarea>
+    </label>
+    <p class="report" id="input-report"></p>
+  </section>
+
+  <section class="panel">
+    <h2>2 - Options</h2>
+    <div class="grid">
+      <label class="field"><span>Expected field (microTesla)</span>
+        <input type="number" id="field" value="1000" step="any"
+          placeholder="e.g. 515 for the bundled sample"></label>
+      <label class="field"><span>Input unit</span>
+        <select id="unit">
+          <option value="auto">auto (from the header)</option>
+          <option value="microtesla">microtesla</option>
+          <option value="gauss">gauss</option>
+          <option value="nanotesla">nanotesla</option>
+          <option value="tesla">tesla</option>
+        </select></label>
+      <label class="field"><span>Drop samples closer than (microTesla)</span>
+        <input type="number" id="min-delta" value="0" step="any" min="0"></label>
+      <label class="field"><span>Maximum samples</span>
+        <input type="number" id="max-points" min="1" placeholder="no limit"></label>
+      <label class="field"><span>Extract pattern (3 groups)</span>
+        <input type="text" id="extract-pattern" spellcheck="false"
+          placeholder="(\S+),(\S+),(\S+)"></label>
+      <label class="field"><span>Declination (degrees)</span>
+        <input type="number" id="declination" value="0" step="any"></label>
+      <label class="field"><span>Target residual (%)</span>
+        <input type="number" id="max-error" value="5" step="any" min="0"></label>
+    </div>
+    <div class="row">
+      <button type="button" id="calibrate-button" class="primary">Calibrate</button>
+      <span class="hint" id="status">ready</span>
+    </div>
+  </section>
+
+  <section class="panel" id="result-panel" hidden>
+    <h2>3 - Result</h2>
+    <p class="badge" id="quality-badge"></p>
+    <p class="hint" id="field-note"></p>
+    <div class="warnings" id="warnings"></div>
+    <div class="grid">
+      <div>
+        <h3>Hard iron bias (microTesla)</h3>
+        <table class="coefficients" id="hard-iron-table"></table>
+      </div>
+      <div>
+        <h3>Soft iron matrix</h3>
+        <table class="coefficients" id="soft-iron-table"></table>
+      </div>
+    </div>
+    <div id="plots"></div>
+    <h3>Quality report</h3>
+    <pre id="report-text"></pre>
+    <details><summary>Machine readable report (JSON)</summary><pre id="report-json"></pre></details>
+    <h3>C code</h3>
+    <pre id="c-code"></pre>
+    <h3>ESPHome lambda</h3>
+    <pre id="esphome-lambda"></pre>
+    <div class="row">
+      <button type="button" id="download-csv">Download the calibrated data (CSV)</button>
+      <button type="button" id="download-json">Download the calibration (JSON)</button>
+      <button type="button" id="copy-c">Copy the C block</button>
+      <button type="button" id="copy-esphome">Copy the lambda</button>
+    </div>
+    <h3>Patch an ESPHome file</h3>
+    <p class="hint">Drop your <code>esphome_code.yaml</code> and download a copy with the twelve
+      constants replaced (all-or-nothing; your original file is untouched).</p>
+    <input type="file" id="esphome-file" accept=".yaml,.yml">
+    <p class="report" id="esphome-report"></p>
+  </section>
+
+  <section class="panel error" id="error-panel" hidden>
+    <h2>That capture could not be calibrated</h2>
+    <pre id="error-text"></pre>
+    <p class="hint">Rotate the sensor slowly through <strong>all three axes</strong> - not just a
+      flat spin - and record a few hundred samples.</p>
+  </section>
+</main>
+
+<footer>
+  <p>
+    Part of the
+    <a href="https://github.com/nliaudat/magnetometer_calibration">magnetometer_calibration</a>
+    project. Usage, quality metrics and troubleshooting:
+    <a href="https://github.com/nliaudat/magnetometer_calibration/tree/main/docs">the documentation</a>.
+    <a href="./tests/parity.html">Run the parity tests</a> against the Python implementation.
+  </p>
+</footer>
+
+<!-- file-guard:start -->
+<!--
+  The app is an ES module, and browsers refuse to load modules (or `fetch` files) from a
+  `file://` page.  index.html therefore MUST be served over HTTP - double-clicking it cannot
+  work.  The classic script below is the only JavaScript that still runs in that situation, so
+  it explains what to do instead of leaving every button silently dead.
+
+  tools/build_single_file.py removes this block when it inlines everything into one file
+  (magcal.html), which *does* work from the file system.
+-->
+<script>
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var panel = document.createElement("section");
+    panel.className = "panel error";
+    var heading = document.createElement("h2");
+    heading.textContent = "Serve this page over HTTP";
+    var text = document.createElement("p");
+    text.innerHTML = "Browsers block ES modules and file loading for <code>file://</code> pages, "
+      + "so the app cannot run when you open <code>index.html</code> directly.";
+    var commands = document.createElement("pre");
+    commands.textContent = "cd <the magnetometer_calibration folder>\n"
+      + "python tools/serve.py --open\n\n"
+      + "# or, equivalently:\n"
+      + "python -m http.server 8765\n"
+      + "# then open http://localhost:8765/web/";
+    panel.appendChild(heading);
+    panel.appendChild(text);
+    panel.appendChild(commands);
+    document.body.insertBefore(panel, document.body.firstChild);
+    Array.prototype.forEach.call(
+      document.querySelectorAll("button, input, select, textarea"),
+      function (element) { element.disabled = true; }
+    );
+    var status = document.getElementById("status");
+    if (status) { status.textContent = "not served over HTTP"; }
+  });
+}
+</script>
+<!-- file-guard:end -->
+<script type="module" src="./app.js"></script>
+</body>
+</html>

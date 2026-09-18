@@ -1,0 +1,82 @@
+name: pages
+
+# Publishes the browser port to GitHub Pages.
+#
+# Requires, once, in the repository settings:
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+#
+# The deploy job only runs when the port's parity tests pass, so the site can never ship a
+# numerically wrong core.  See docs/web-app.md for the whole picture.
+
+on:
+  push:
+    branches: [webapp]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  web-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the Python tools' dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: The fixture must still match calibrate.py
+        run: python tools/dump_golden.py --check
+
+      - name: Run the port's parity tests
+        run: node --test web/tests
+
+      - name: Build the site and check it in a browser (HTTP and file://)
+        run: |
+          python tools/build_site.py
+          python tools/run_web_tests.py --all
+
+  build:
+    needs: web-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Assemble the static site
+        run: python tools/build_site.py
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

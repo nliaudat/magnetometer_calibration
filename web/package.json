@@ -1,0 +1,9 @@
+{
+  "name": "magcal-web",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-free browser port of the magcal calibration core",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

@@ -1,0 +1,2472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magnetometer calibration - ellipsoid fit in the browser</title>
+<meta name="description" content="Correct hard iron and soft iron distortion of a magnetometer from a raw capture. The same ellipsoid fit as the magcal command line tool, running entirely in your browser.">
+<style>
+:root {
+  --ink: #1f2328;
+  --muted: #59636e;
+  --line: #d1d9e0;
+  --bg: #ffffff;
+  --panel: #f6f8fa;
+  --accent: #0969da;
+  --pass: #1a7f37;
+  --fail: #cf222e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  max-width: 68rem;
+  padding: 1.5rem 1rem 4rem;
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+header h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
+.tagline { margin: 0 0 1.5rem; color: var(--muted); }
+
+h2 { margin: 0 0 .75rem; font-size: 1.15rem; }
+h3 { margin: 1.25rem 0 .5rem; font-size: 1rem; }
+a { color: var(--accent); }
+code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; }
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem 1.25rem 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--panel);
+}
+.panel.error { border-color: var(--fail); background: #fff5f5; }
+
+.dropzone {
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  background: var(--bg);
+  text-align: center;
+}
+.dropzone.over { border-color: var(--accent); background: #f0f6ff; }
+.dropzone p { margin: .25rem 0; }
+
+.row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: .75rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
+
+.field { display: flex; flex-direction: column; gap: .25rem; margin-top: .75rem; }
+.field > span { font-size: .85rem; color: var(--muted); }
+input, select, textarea {
+  font: inherit;
+  color: inherit;
+  padding: .4rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+textarea, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .82rem; }
+textarea { width: 100%; resize: vertical; }
+
+button {
+  font: inherit;
+  padding: .4rem .8rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { color: #fff; opacity: .9; }
+.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+.hint, .report { color: var(--muted); font-size: .85rem; }
+.report { margin: .5rem 0 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+.badge { font-weight: 600; margin: 0 0 .5rem; }
+.badge.pass { color: var(--pass); }
+.badge.fail { color: var(--fail); }
+
+.warnings { color: #9a6700; font-size: .9rem; }
+.warnings p { margin: .25rem 0; }
+
+pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .75rem;
+  overflow-x: auto;
+  margin: 0;
+}
+
+table.coefficients { border-collapse: collapse; width: 100%; background: var(--bg); }
+table.coefficients td, table.coefficients th {
+  border: 1px solid var(--line);
+  padding: .25rem .5rem;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: .85rem;
+}
+table.coefficients th { background: var(--panel); }
+
+details { margin-top: .75rem; }
+summary { cursor: pointer; color: var(--muted); }
+
+footer { margin-top: 2rem; color: var(--muted); font-size: .85rem; }
+
+svg.plot { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+
+</style>
+</head>
+<body>
+<header>
+  <h1>Magnetometer calibration</h1>
+  <p class="tagline">
+    Ellipsoid fitting that corrects <strong>hard iron</strong> and <strong>soft iron</strong>
+    distortion - the same algorithm as the
+    <a href="https://github.com/nliaudat/magnetometer_calibration"><code>magcal</code> command line tool</a>,
+    running entirely in your browser. <strong>Your capture is never uploaded.</strong>
+  </p>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>1 - Capture</h2>
+    <div class="dropzone" id="dropzone">
+      <p><strong>Drop a capture file here</strong></p>
+      <p class="hint">or <label class="link">choose a file
+        <input type="file" id="file-input" accept=".txt,.csv,.log,.json" hidden></label></p>
+      <p class="hint">One <code>x,y,z</code> row per line (microTesla). Comma, semicolon, tab or
+        whitespace separated, with or without a header, or raw ESPHome/serial log lines.</p>
+    </div>
+    <div class="row">
+      <button type="button" id="sample-button">Load the sample capture</button>
+      <button type="button" id="clear-button">Clear</button>
+    </div>
+    <label class="field">
+      <span>Capture text (paste or edit)</span>
+      <textarea id="capture-text" rows="7" spellcheck="false"
+        placeholder="33.1,98.3,571.2&#10;34.2,97.1,570.8"></textarea>
+    </label>
+    <p class="report" id="input-report"></p>
+  </section>
+
+  <section class="panel">
+    <h2>2 - Options</h2>
+    <div class="grid">
+      <label class="field"><span>Expected field (microTesla)</span>
+        <input type="number" id="field" value="1000" step="any"
+          placeholder="e.g. 515 for the bundled sample"></label>
+      <label class="field"><span>Input unit</span>
+        <select id="unit">
+          <option value="auto">auto (from the header)</option>
+          <option value="microtesla">microtesla</option>
+          <option value="gauss">gauss</option>
+          <option value="nanotesla">nanotesla</option>
+          <option value="tesla">tesla</option>
+        </select></label>
+      <label class="field"><span>Drop samples closer than (microTesla)</span>
+        <input type="number" id="min-delta" value="0" step="any" min="0"></label>
+      <label class="field"><span>Maximum samples</span>
+        <input type="number" id="max-points" min="1" placeholder="no limit"></label>
+      <label class="field"><span>Extract pattern (3 groups)</span>
+        <input type="text" id="extract-pattern" spellcheck="false"
+          placeholder="(\S+),(\S+),(\S+)"></label>
+      <label class="field"><span>Declination (degrees)</span>
+        <input type="number" id="declination" value="0" step="any"></label>
+      <label class="field"><span>Target residual (%)</span>
+        <input type="number" id="max-error" value="5" step="any" min="0"></label>
+    </div>
+    <div class="row">
+      <button type="button" id="calibrate-button" class="primary">Calibrate</button>
+      <span class="hint" id="status">ready</span>
+    </div>
+  </section>
+
+  <section class="panel" id="result-panel" hidden>
+    <h2>3 - Result</h2>
+    <p class="badge" id="quality-badge"></p>
+    <p class="hint" id="field-note"></p>
+    <div class="warnings" id="warnings"></div>
+    <div class="grid">
+      <div>
+        <h3>Hard iron bias (microTesla)</h3>
+        <table class="coefficients" id="hard-iron-table"></table>
+      </div>
+      <div>
+        <h3>Soft iron matrix</h3>
+        <table class="coefficients" id="soft-iron-table"></table>
+      </div>
+    </div>
+    <div id="plots"></div>
+    <h3>Quality report</h3>
+    <pre id="report-text"></pre>
+    <details><summary>Machine readable report (JSON)</summary><pre id="report-json"></pre></details>
+    <h3>C code</h3>
+    <pre id="c-code"></pre>
+    <h3>ESPHome lambda</h3>
+    <pre id="esphome-lambda"></pre>
+    <div class="row">
+      <button type="button" id="download-csv">Download the calibrated data (CSV)</button>
+      <button type="button" id="download-json">Download the calibration (JSON)</button>
+      <button type="button" id="copy-c">Copy the C block</button>
+      <button type="button" id="copy-esphome">Copy the lambda</button>
+    </div>
+    <h3>Patch an ESPHome file</h3>
+    <p class="hint">Drop your <code>esphome_code.yaml</code> and download a copy with the twelve
+      constants replaced (all-or-nothing; your original file is untouched).</p>
+    <input type="file" id="esphome-file" accept=".yaml,.yml">
+    <p class="report" id="esphome-report"></p>
+  </section>
+
+  <section class="panel error" id="error-panel" hidden>
+    <h2>That capture could not be calibrated</h2>
+    <pre id="error-text"></pre>
+    <p class="hint">Rotate the sensor slowly through <strong>all three axes</strong> - not just a
+      flat spin - and record a few hundred samples.</p>
+  </section>
+</main>
+
+<footer>
+  <p>
+    Part of the
+    <a href="https://github.com/nliaudat/magnetometer_calibration">magnetometer_calibration</a>
+    project. Usage, quality metrics and troubleshooting:
+    <a href="https://github.com/nliaudat/magnetometer_calibration/tree/main/docs">the documentation</a>.
+    <a href="./tests/parity.html">Run the parity tests</a> against the Python implementation.
+  </p>
+</footer>
+
+<script>
+// Bundled from web/js.  Each module keeps its own scope, so top-level names that
+// repeat between modules (AXES, SEPARATOR, ...) cannot collide.
+
+
+// --- web/js/errors.js ----------------------------------------------
+const __magcal_errors = (function () {
+/**
+ * Domain errors shared by the browser modules.
+ *
+ * `magcal` raises `ValueError` with an actionable message for every unusable capture; the
+ * port raises the same class with the same wording so the app can show exactly what the CLI
+ * would print.
+ */
+
+/** Raised for the same reasons `magcal` raises `ValueError`. */
+class ValueError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValueError";
+  }
+}
+
+/** Raised when a decomposition fails (singular matrix, not positive definite). */
+class LinAlgError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "LinAlgError";
+  }
+}
+
+return { LinAlgError, ValueError };
+})();
+
+// --- web/js/linalg.js ----------------------------------------------
+const __magcal_linalg = (function () {
+const { LinAlgError } = __magcal_errors;
+/**
+ * Dense linear algebra for the magnetometer calibration port.
+ *
+ * Every matrix is a plain array of arrays of `Number`, so the code runs unchanged in a
+ * browser, in Node and in a test harness.  The sizes are tiny (3x3, 4x4, 6x6, 10x10), so
+ * simple, auditable algorithms are preferred over anything clever: the whole point is to
+ * reproduce what `numpy.linalg` / `scipy.linalg` do in `magcal/ellipsoid.py`.
+ *
+ * Conventions used throughout:
+ *   - `Float64Array`-free nested arrays: `[[a, b], [c, d]]` is row-major.
+ *   - indices are 0 based, `a[i][j]` is row `i`, column `j`.
+ *   - the Cholesky factor is returned **upper triangular** (`a = R^T R`), matching
+ *     `numpy.linalg.cholesky(a).T`, which is how `tools/compare_fit_routes.py` derives the
+ *     symmetric reformulation of the ellipsoid fit.
+ */
+
+/** Raised when a decomposition fails (singular or not positive definite). */
+
+
+/** Return an `n` by `m` (default `n` by `n`) matrix of zeros. */
+function zeros(n, m = n) {
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    out.push(new Array(m).fill(0));
+  }
+  return out;
+}
+
+/** Return the `n` by `n` identity matrix. */
+function identity(n) {
+  const out = zeros(n);
+  for (let i = 0; i < n; i += 1) {
+    out[i][i] = 1;
+  }
+  return out;
+}
+
+/** Return a copy of a matrix (row by row, so the rows are independent arrays). */
+function cloneMatrix(a) {
+  return a.map((row) => row.slice());
+}
+
+/** Return the transpose of a matrix. */
+function transpose(a) {
+  const out = zeros(a[0].length, a.length);
+  for (let i = 0; i < a.length; i += 1) {
+    for (let j = 0; j < a[0].length; j += 1) {
+      out[j][i] = a[i][j];
+    }
+  }
+  return out;
+}
+
+/** Return the matrix product `a @ b`. */
+function matmul(a, b) {
+  const n = a.length;
+  const k = b.length;
+  const m = b[0].length;
+  const out = zeros(n, m);
+  for (let i = 0; i < n; i += 1) {
+    for (let p = 0; p < k; p += 1) {
+      const factor = a[i][p];
+      if (factor === 0) {
+        continue;
+      }
+      const row = b[p];
+      for (let j = 0; j < m; j += 1) {
+        out[i][j] += factor * row[j];
+      }
+    }
+  }
+  return out;
+}
+
+/** Return the matrix-vector product `a @ x` as a new array. */
+function matvec(a, x) {
+  const out = new Array(a.length).fill(0);
+  for (let i = 0; i < a.length; i += 1) {
+    let sum = 0;
+    for (let j = 0; j < x.length; j += 1) {
+      sum += a[i][j] * x[j];
+    }
+    out[i] = sum;
+  }
+  return out;
+}
+
+/** Return the dot product of two vectors. */
+function dot(x, y) {
+  let sum = 0;
+  for (let i = 0; i < x.length; i += 1) {
+    sum += x[i] * y[i];
+  }
+  return sum;
+}
+
+/** Return the Euclidean norm of a vector. */
+function norm(x) {
+  return Math.sqrt(dot(x, x));
+}
+
+/** Return a scaled copy of a vector. */
+function scaled(x, factor) {
+  return x.map((value) => value * factor);
+}
+
+/** Return the Frobenius norm of a matrix. */
+function frobenius(a) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    for (let j = 0; j < a[0].length; j += 1) {
+      sum += a[i][j] * a[i][j];
+    }
+  }
+  return Math.sqrt(sum);
+}
+
+/** Return the largest absolute entry of a matrix (0 for an empty matrix). */
+function maxAbs(a) {
+  let best = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    for (let j = 0; j < a[0].length; j += 1) {
+      best = Math.max(best, Math.abs(a[i][j]));
+    }
+  }
+  return best;
+}
+
+/** Return true when every entry of a matrix is finite. */
+function isFiniteMatrix(a) {
+  for (let i = 0; i < a.length; i += 1) {
+    for (let j = 0; j < a[0].length; j += 1) {
+      if (!Number.isFinite(a[i][j])) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/** Return the right hand side of a linear solve as `[[...], ...]` (n, k). */
+function asColumns(b) {
+  if (Array.isArray(b[0])) {
+    return cloneMatrix(b);
+  }
+  return b.map((value) => [value]);
+}
+
+/** Return column `j` of a solution matrix as a vector (or the only column). */
+function takeSolution(solution, width) {
+  if (width === 1) {
+    return solution.map((row) => row[0]);
+  }
+  return solution;
+}
+
+/**
+ * Solve `a x = b` with LU decomposition and partial pivoting.
+ *
+ * `b` is a vector `(n,)` or a matrix `(n, k)`; the result has the same shape.  Raises
+ * `LinAlgError` when `a` is singular, which is the browser equivalent of the
+ * `scipy.linalg.LinAlgError` that `magcal` reports as a degenerate capture.
+ */
+function solve(a, b) {
+  const n = a.length;
+  const lu = cloneMatrix(a);
+  const rhs = asColumns(b);
+  const width = rhs[0].length;
+  const order = [];
+  for (let index = 0; index < n; index += 1) {
+    order.push(index);
+  }
+
+  for (let column = 0; column < n; column += 1) {
+    let pivot = column;
+    let best = Math.abs(lu[column][column]);
+    for (let row = column + 1; row < n; row += 1) {
+      const candidate = Math.abs(lu[row][column]);
+      if (candidate > best) {
+        best = candidate;
+        pivot = row;
+      }
+    }
+    if (best === 0) {
+      throw new LinAlgError("singular matrix");
+    }
+    if (pivot !== column) {
+      const swappedRow = lu[column];
+      lu[column] = lu[pivot];
+      lu[pivot] = swappedRow;
+      const swappedIndex = order[column];
+      order[column] = order[pivot];
+      order[pivot] = swappedIndex;
+    }
+    for (let row = column + 1; row < n; row += 1) {
+      const factor = lu[row][column] / lu[column][column];
+      lu[row][column] = factor;
+      for (let j = column + 1; j < n; j += 1) {
+        lu[row][j] -= factor * lu[column][j];
+      }
+    }
+  }
+
+  const x = order.map((row) => rhs[row].slice());
+  for (let i = 1; i < n; i += 1) {
+    for (let k = 0; k < i; k += 1) {
+      const factor = lu[i][k];
+      if (factor !== 0) {
+        for (let j = 0; j < width; j += 1) {
+          x[i][j] -= factor * x[k][j];
+        }
+      }
+    }
+  }
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let k = i + 1; k < n; k += 1) {
+      const factor = lu[i][k];
+      if (factor !== 0) {
+        for (let j = 0; j < width; j += 1) {
+          x[i][j] -= factor * x[k][j];
+        }
+      }
+    }
+    const pivot = lu[i][i];
+    if (pivot === 0) {
+      throw new LinAlgError("singular matrix");
+    }
+    for (let j = 0; j < width; j += 1) {
+      x[i][j] /= pivot;
+    }
+  }
+  return takeSolution(x, width);
+}
+
+/** Return the inverse of `a` (Gauss-Jordan elimination with partial pivoting). */
+function inv(a) {
+  const n = a.length;
+  const work = a.map((row, index) => row.concat(identity(n)[index]));
+  for (let column = 0; column < n; column += 1) {
+    let pivot = column;
+    let best = Math.abs(work[column][column]);
+    for (let row = column + 1; row < n; row += 1) {
+      const candidate = Math.abs(work[row][column]);
+      if (candidate > best) {
+        best = candidate;
+        pivot = row;
+      }
+    }
+    if (best === 0) {
+      throw new LinAlgError("singular matrix");
+    }
+    if (pivot !== column) {
+      const swapped = work[column];
+      work[column] = work[pivot];
+      work[pivot] = swapped;
+    }
+    const diagonal = work[column][column];
+    for (let j = 0; j < 2 * n; j += 1) {
+      work[column][j] /= diagonal;
+    }
+    for (let row = 0; row < n; row += 1) {
+      if (row === column) {
+        continue;
+      }
+      const factor = work[row][column];
+      if (factor === 0) {
+        continue;
+      }
+      for (let j = 0; j < 2 * n; j += 1) {
+        work[row][j] -= factor * work[column][j];
+      }
+    }
+  }
+  return work.map((row) => row.slice(n));
+}
+
+/** Solve `l x = b` for a lower triangular `l` (vector or `(n, k)` right hand side). */
+function solveLowerTriangular(l, b) {
+  const n = l.length;
+  const rhs = asColumns(b);
+  const width = rhs[0].length;
+  const x = rhs.map((row) => row.slice());
+  for (let i = 0; i < n; i += 1) {
+    for (let k = 0; k < i; k += 1) {
+      const factor = l[i][k];
+      if (factor !== 0) {
+        for (let j = 0; j < width; j += 1) {
+          x[i][j] -= factor * x[k][j];
+        }
+      }
+    }
+    const pivot = l[i][i];
+    if (pivot === 0) {
+      throw new LinAlgError("singular triangular matrix");
+    }
+    for (let j = 0; j < width; j += 1) {
+      x[i][j] /= pivot;
+    }
+  }
+  return takeSolution(x, width);
+}
+
+/** Solve `u x = b` for an upper triangular `u` (vector or `(n, k)` right hand side). */
+function solveUpperTriangular(u, b) {
+  const n = u.length;
+  const rhs = asColumns(b);
+  const width = rhs[0].length;
+  const x = rhs.map((row) => row.slice());
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let k = i + 1; k < n; k += 1) {
+      const factor = u[i][k];
+      if (factor !== 0) {
+        for (let j = 0; j < width; j += 1) {
+          x[i][j] -= factor * x[k][j];
+        }
+      }
+    }
+    const pivot = u[i][i];
+    if (pivot === 0) {
+      throw new LinAlgError("singular triangular matrix");
+    }
+    for (let j = 0; j < width; j += 1) {
+      x[i][j] /= pivot;
+    }
+  }
+  return takeSolution(x, width);
+}
+
+/**
+ * Return the upper triangular Cholesky factor `R` of a symmetric matrix, `a = R^T R`.
+ *
+ * Matches `numpy.linalg.cholesky(a).T`: the factor is upper triangular so the symmetric
+ * reformulation in `fit.js` reads exactly like the Python prototype.  Raises `LinAlgError`
+ * when `a` is not positive definite - the port's way of detecting a capture that does not
+ * constrain the ellipsoid in all three directions.
+ */
+function cholesky(a) {
+  const n = a.length;
+  const r = zeros(n);
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i; j < n; j += 1) {
+      let sum = a[i][j];
+      for (let k = 0; k < i; k += 1) {
+        sum -= r[k][i] * r[k][j];
+      }
+      if (i === j) {
+        if (!(sum > 0) || !Number.isFinite(sum)) {
+          throw new LinAlgError("matrix is not positive definite");
+        }
+        r[i][j] = Math.sqrt(sum);
+      } else {
+        r[i][j] = sum / r[i][i];
+      }
+    }
+  }
+  return r;
+}
+
+/**
+ * Jacobi eigenvalue decomposition of a symmetric matrix.
+ *
+ * Returns `{ values, vectors }` with the eigenvalues sorted ascending and column `j` of
+ * `vectors` belonging to `values[j]` - the contract of `numpy.linalg.eigh`, which the
+ * diagnostics use for `eigvalsh`/`cov`.  Classical cyclic Jacobi with an exact rotation per
+ * (p, q) pair: for 3x3..10x10 matrices it converges in a handful of sweeps to machine
+ * precision and cannot fail, unlike QR on a nearly singular matrix.
+ */
+function jacobiEigh(a, { maxSweeps = 100, tolerance = 1e-16 } = {}) {
+  const n = a.length;
+  const work = cloneMatrix(a);
+  const vectors = identity(n);
+  const scale = frobenius(a) || 1;
+
+  for (let sweep = 0; sweep < maxSweeps; sweep += 1) {
+    let offDiagonal = 0;
+    for (let p = 0; p < n - 1; p += 1) {
+      for (let q = p + 1; q < n; q += 1) {
+        const apq = work[p][q];
+        offDiagonal += apq * apq;
+        if (apq === 0) {
+          continue;
+        }
+        const theta = (work[q][q] - work[p][p]) / (2 * apq);
+        const sign = theta >= 0 ? 1 : -1;
+        const t = sign / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        for (let k = 0; k < n; k += 1) {
+          const akp = work[k][p];
+          const akq = work[k][q];
+          work[k][p] = c * akp - s * akq;
+          work[k][q] = s * akp + c * akq;
+        }
+        for (let k = 0; k < n; k += 1) {
+          const apk = work[p][k];
+          const aqk = work[q][k];
+          work[p][k] = c * apk - s * aqk;
+          work[q][k] = s * apk + c * aqk;
+        }
+        for (let k = 0; k < n; k += 1) {
+          const vkp = vectors[k][p];
+          const vkq = vectors[k][q];
+          vectors[k][p] = c * vkp - s * vkq;
+          vectors[k][q] = s * vkp + c * vkq;
+        }
+      }
+    }
+    if (Math.sqrt(2 * offDiagonal) <= tolerance * scale) {
+      break;
+    }
+  }
+
+  const order = [];
+  for (let i = 0; i < n; i += 1) {
+    order.push(i);
+  }
+  order.sort((left, right) => work[left][left] - work[right][right]);
+  const values = order.map((index) => work[index][index]);
+  const sorted = zeros(n);
+  for (let j = 0; j < n; j += 1) {
+    for (let i = 0; i < n; i += 1) {
+      sorted[i][j] = vectors[i][order[j]];
+    }
+  }
+  return { values, vectors: sorted };
+}
+
+/** Return the eigenvalues of a symmetric matrix, ascending (`numpy.linalg.eigvalsh`). */
+function eigenvaluesSymmetric(a) {
+  return jacobiEigh(a).values;
+}
+
+/**
+ * Symmetric square root `V diag(sqrt(w)) V^T` of a symmetric positive definite matrix.
+ *
+ * `scipy.linalg.sqrtm` in `magcal/ellipsoid.py` uses a Schur decomposition, but a positive
+ * definite matrix has a unique principal root, so this eigen decomposition route returns the
+ * same matrix to round-off (verified against scipy in `tools/compare_fit_routes.py`).
+ */
+function sqrtmSymmetric(a) {
+  const { values, vectors } = jacobiEigh(a);
+  const n = a.length;
+  for (let k = 0; k < n; k += 1) {
+    if (!(values[k] >= 0)) {
+      throw new LinAlgError("matrix has a negative eigenvalue, so it has no real square root");
+    }
+  }
+  const roots = values.map((value) => Math.sqrt(value));
+  const out = zeros(n);
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < n; j += 1) {
+      let sum = 0;
+      for (let k = 0; k < n; k += 1) {
+        sum += vectors[i][k] * roots[k] * vectors[j][k];
+      }
+      out[i][j] = sum;
+    }
+  }
+  return out;
+}
+
+
+
+return { LinAlgError, cholesky, cloneMatrix, dot, eigenvaluesSymmetric, frobenius, identity, inv, isFiniteMatrix, jacobiEigh, matmul, matvec, maxAbs, norm, scaled, solve, solveLowerTriangular, solveUpperTriangular, sqrtmSymmetric, transpose, zeros };
+})();
+
+// --- web/js/format.js ----------------------------------------------
+const __magcal_format = (function () {
+/**
+ * C `printf` compatible number formatting.
+ *
+ * `magcal` prints coefficients with `%.6f` (the C block) and `%.12g` (the ESPHome lambda), so
+ * the port has to reproduce those exactly.  The pinned expectations in
+ * `web/tests/golden/python-golden.json` are produced by Python's own `%` operator, which is
+ * correctly rounded and rounds *half to even*; JavaScript's `toFixed` rounds ties away from
+ * zero, which is why `formatSix` handles exact decimal ties itself.
+ */
+
+/** True when `magnitude` is an exact decimal tie at the seventh digit (e.g. 0.0078125). */
+function isSeventhDigitTie(magnitude) {
+  if (!(magnitude < 1e7)) {
+    return false;
+  }
+  // `toFixed(20)` exposes the exact decimal digits, so a real tie shows up as six decimals
+  // followed by a 5 and nothing else.  Multiplying by 1e7 instead would *create* ties: the
+  // product of 2.0000005 by 1e6 rounds to exactly 2000000.5.
+  return /^\d+\.\d{6}5(0*)$/.test(magnitude.toFixed(20));
+}
+
+/** Return `value` formatted like C's `%.6f` (six decimals, half to even on exact ties). */
+function formatSix(value) {
+  const number = Number(value);
+  if (Number.isNaN(number)) {
+    return "nan";
+  }
+  if (!Number.isFinite(number)) {
+    return number > 0 ? "inf" : "-inf";
+  }
+  const negative = number < 0 || Object.is(number, -0);
+  const magnitude = Math.abs(number);
+  let digits;
+  if (magnitude >= 1e21) {
+    // toFixed switches to exponential notation up there; such doubles are integers, so the
+    // integer part can be produced exactly (and the fraction is always .000000)
+    digits = `${BigInt(magnitude)}000000`;
+  } else if (isSeventhDigitTie(magnitude)) {
+    const lower = Math.floor((magnitude * 1e7) / 10);
+    digits = String(lower % 2 === 0 ? lower : lower + 1);
+  } else {
+    digits = magnitude.toFixed(6).replace(".", "");
+  }
+  digits = digits.padStart(7, "0");
+  return `${negative ? "-" : ""}${digits.slice(0, -6)}.${digits.slice(-6)}`;
+}
+
+/**
+ * Return `value` formatted like C's `%.<precision>g`.
+ *
+ * `%g` rounds to `precision` significant digits, then picks the exponent form when the
+ * decimal exponent is below -4 or at least `precision`, and finally removes trailing zeros
+ * from the *fraction* only - which is why `99999999999.9999` prints as `100000000000`
+ * rather than `1e+11`.
+ */
+function formatGauss(value, precision = 12) {
+  const number = Number(value);
+  if (Number.isNaN(number)) {
+    return "nan";
+  }
+  if (!Number.isFinite(number)) {
+    return number > 0 ? "inf" : "-inf";
+  }
+  const negative = number < 0 || Object.is(number, -0);
+  const magnitude = Math.abs(number);
+  if (magnitude === 0) {
+    return negative ? "-0" : "0";
+  }
+  const exponential = magnitude.toExponential(Math.max(0, precision - 1));
+  const [mantissa, exponentText] = exponential.split("e");
+  const exponent = Number(exponentText);
+  let digits = mantissa.replace(".", "").replace(/0+$/, "");
+  if (digits === "") {
+    digits = "0";
+  }
+  const sign = negative ? "-" : "";
+  if (exponent < -4 || exponent >= precision) {
+    const head = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : digits;
+    const exponentSign = exponent < 0 ? "-" : "+";
+    const exponentDigits = String(Math.abs(exponent)).padStart(2, "0");
+    return `${sign}${head}e${exponentSign}${exponentDigits}`;
+  }
+  if (exponent >= 0) {
+    const integerDigits = digits.slice(0, exponent + 1).padEnd(exponent + 1, "0");
+    const fraction = digits.slice(exponent + 1);
+    return `${sign}${integerDigits}${fraction ? `.${fraction}` : ""}`;
+  }
+  const leadingZeros = "0".repeat(-exponent - 1);
+  return `${sign}0.${leadingZeros}${digits}`;
+}
+
+return { formatGauss, formatSix };
+})();
+
+// --- web/js/fit.js -------------------------------------------------
+const __magcal_fit = (function () {
+const { cholesky, dot, eigenvaluesSymmetric, inv, jacobiEigh, matmul, matvec, maxAbs, norm, solve, solveLowerTriangular, solveUpperTriangular, sqrtmSymmetric, transpose } = __magcal_linalg;
+const { LinAlgError, ValueError } = __magcal_errors;
+/**
+ * Least squares ellipsoid fitting (Li & Griffiths, 2004) - browser port of
+ * `magcal/ellipsoid.py`, using the Cholesky reformulation of the reduced eigenproblem.
+ *
+ * The Python tool takes the eigenvector of the non-symmetric
+ * `E = C^-1 (S_11 - S_12 S_22^-1 S_21)` for its algebraically largest eigenvalue.  Instead
+ * of porting a general (non-symmetric) eigensolver, this module solves the *same*
+ * generalized problem `S~ v = lambda C v` symmetrically:
+ *
+ *     S~ = R^T R          Cholesky (S~ is positive definite for a usable capture)
+ *     Chat = R^-T C R^-1  symmetric
+ *     Chat u = mu u       symmetric eigenproblem, u orthonormal, mu = 1 / lambda
+ *     v = R^-1 u
+ *
+ * `tools/compare_fit_routes.py` measures the two routes against each other: on the bundled
+ * capture they agree to 1.2e-7 and on 200 noisy synthetic sweeps to 1.2e-10, with no
+ * refusals - the eigenvector residual is even lower than the non-symmetric route's.  A
+ * Cholesky failure means the capture does not constrain the ellipsoid in all directions,
+ * which is exactly what the Python guards report.
+ */
+
+
+
+
+/** Fewer samples than this cannot constrain an ellipsoid (mirrors `magcal.constants`). */
+const MIN_SAMPLES = 10;
+
+/** The `k = 4` constraint matrix of the paper (eq. 8). */
+const C_CONSTRAINT = [
+  [-1, 1, 1, 0, 0, 0],
+  [1, -1, 1, 0, 0, 0],
+  [1, 1, -1, 0, 0, 0],
+  [0, 0, 0, -4, 0, 0],
+  [0, 0, 0, 0, -4, 0],
+  [0, 0, 0, 0, 0, -4],
+];
+
+const AXES = "xyz";
+
+/** Return the (N, 3) samples, rejecting the layouts `magcal.ellipsoid` rejects. */
+function validateSamples(samples, minSamples = MIN_SAMPLES) {
+  if (!Array.isArray(samples) || samples.length === 0) {
+    throw new ValueError(
+      "expected magnetometer data as an (N, 3) array of X, Y, Z samples, got an empty input",
+    );
+  }
+  const rows = samples.map((row) => {
+    const values = Array.isArray(row) || ArrayBuffer.isView(row) ? Array.from(row) : [row];
+    if (values.length !== 3) {
+      throw new ValueError(
+        "expected magnetometer data as an (N, 3) array of X, Y, Z samples, "
+        + `got shape (${samples.length}, ${values.length})`,
+      );
+    }
+    return values.map(Number);
+  });
+  if (rows.length < minSamples) {
+    throw new ValueError(
+      `need at least ${minSamples} samples for an ellipsoid fit, got ${rows.length}`,
+    );
+  }
+  for (const row of rows) {
+    if (!row.every((value) => Number.isFinite(value))) {
+      throw new ValueError("data contains NaN or infinite values; clean the capture first");
+    }
+  }
+  const spans = [0, 1, 2].map((axis) => {
+    let low = Infinity;
+    let high = -Infinity;
+    for (const row of rows) {
+      low = Math.min(low, row[axis]);
+      high = Math.max(high, row[axis]);
+    }
+    return high - low;
+  });
+  if (!spans.every((span) => span > 0)) {
+    const weakest = spans.indexOf(Math.min(...spans));
+    throw new ValueError(
+      `axis ${AXES[weakest].toUpperCase()} never changes in this capture; rotate the sensor `
+      + "through all three axes before calibrating",
+    );
+  }
+  return rows;
+}
+
+/** Return the 10x10 scatter matrix `S = D D^T` of the design matrix (eq. 11). */
+function scatterMatrix(samples) {
+  const columns = [0, 1, 2].map((axis) => samples.map((row) => row[axis]));
+  const monomials = [
+    columns[0].map((value) => value * value),
+    columns[1].map((value) => value * value),
+    columns[2].map((value) => value * value),
+    columns[1].map((value, index) => 2 * value * columns[2][index]),
+    columns[0].map((value, index) => 2 * value * columns[2][index]),
+    columns[0].map((value, index) => 2 * value * columns[1][index]),
+    columns[0].map((value) => 2 * value),
+    columns[1].map((value) => 2 * value),
+    columns[2].map((value) => 2 * value),
+    columns[0].map(() => 1),
+  ];
+  const S = [];
+  for (let i = 0; i < 10; i += 1) {
+    S.push(new Array(10).fill(0));
+  }
+  for (let i = 0; i < 10; i += 1) {
+    for (let j = i; j < 10; j += 1) {
+      let sum = 0;
+      for (let k = 0; k < monomials[i].length; k += 1) {
+        sum += monomials[i][k] * monomials[j][k];
+      }
+      S[i][j] = sum;
+      S[j][i] = sum;
+    }
+  }
+  return S;
+}
+
+/** Return the 6x6 reduced matrix `S~ = S_11 - S_12 S_22^-1 S_21` (eq. 15 numerator). */
+function pencilMatrix(S) {
+  const quadratic = S.slice(0, 6).map((row) => row.slice(0, 6));
+  const mixed = S.slice(0, 6).map((row) => row.slice(6));
+  const bottomLeft = S.slice(6).map((row) => row.slice(0, 6));
+  const bottomRight = S.slice(6).map((row) => row.slice(6));
+  const product = matmul(mixed, solve(bottomRight, bottomLeft));
+  return quadratic.map((row, i) => row.map((value, j) => value - product[i][j]));
+}
+
+/** Return the fitted direction `v_1`, i.e. the eigenvector of the largest eigenvalue. */
+function fitDirection(pencil, constraint = C_CONSTRAINT) {
+  const r = cholesky(pencil);                        // upper triangular, pencil = R^T R
+  const rTransposed = transpose(r);
+  const left = solveLowerTriangular(rTransposed, constraint);      // R^-T C
+  const reduced = transpose(solveLowerTriangular(rTransposed, transpose(left)));  // R^-T C R^-1
+  const { values, vectors } = jacobiEigh(reduced);
+  let best = -1;
+  let bestLambda = -Infinity;
+  for (let k = 0; k < values.length; k += 1) {
+    if (values[k] === 0) {
+      continue;
+    }
+    const lambda = 1 / values[k];
+    if (lambda > bestLambda) {
+      bestLambda = lambda;
+      best = k;
+    }
+  }
+  if (best < 0) {
+    throw new ValueError("degenerate ellipsoid fit; the capture is unusable");
+  }
+  let v = solveUpperTriangular(r, vectors.map((row) => row[best]));  // v = R^-1 u
+  const length = norm(v);
+  if (!(length > 0) || !Number.isFinite(length)) {
+    throw new ValueError("degenerate ellipsoid fit; the capture is unusable");
+  }
+  v = v.map((value) => value / length);
+  if (v[0] < 0) {                                    // load-bearing sign convention
+    v = v.map((value) => -value);
+  }
+  return { direction: v, eigenvalue: bestLambda };
+}
+
+/** True when every entry of a matrix is finite. */
+function isFiniteMatrix(a) {
+  return a.every((row) => row.every((value) => Number.isFinite(value)));
+}
+
+/**
+ * Derive the hard iron bias `b` and the soft iron matrix `A_1` from an ellipsoid fit.
+ *
+ * Mirrors `magcal.ellipsoid.bias_and_matrix`, including its guards and their wording: the
+ * caller gets a `ValueError` explaining the capture instead of NaN/complex coefficients.
+ *
+ * Returns `{ hardIron, softIron, warning }` where `softIron` satisfies
+ * `|A_1 (x - b)| = fieldStrength` for every sample of the capture.
+ */
+function biasAndMatrix(fit, fieldStrength) {
+  const { shape: m, offset, constant: d } = fit;
+  if (!isFiniteMatrix(m) || !isFiniteMatrix([offset]) || !Number.isFinite(d)) {
+    throw new ValueError("ellipsoid fit produced non-finite parameters; capture is unusable");
+  }
+  let inverse;
+  try {
+    inverse = inv(m);
+  } catch (error) {
+    throw new ValueError("singular ellipsoid fit matrix; capture is degenerate");
+  }
+  if (!isFiniteMatrix(inverse)) {
+    throw new ValueError("ellipsoid fit matrix is not invertible; capture is degenerate");
+  }
+  const symmetric = inverse.map((row, i) => row.map((value, j) => (value + inverse[j][i]) / 2));
+  if (!(eigenvaluesSymmetric(symmetric)[0] > 0)) {
+    throw new ValueError(
+      "ellipsoid fit is not positive definite: the capture does not span enough "
+      + "directions for a reliable calibration",
+    );
+  }
+  const radiusTerm = dot(matvec(inverse, offset), offset) - d;
+  if (!Number.isFinite(radiusTerm) || radiusTerm <= 0) {
+    throw new ValueError(
+      "degenerate ellipsoid fit (non-positive radius term); capture is degenerate",
+    );
+  }
+  let squareRoot;
+  try {
+    squareRoot = sqrtmSymmetric(m);
+  } catch (error) {
+    throw new ValueError(
+      "ellipsoid fit has no real soft-iron solution; the capture does not cover all three "
+      + "axes (see the coverage diagnostics)",
+    );
+  }
+  const scale = fieldStrength / Math.sqrt(radiusTerm);
+  const hardIron = matvec(inverse, offset).map((value) => -value);
+  const softIron = squareRoot.map((row) => row.map((value) => value * scale));
+  const tolerance = 1e-8 * (maxAbs(softIron) || 1);
+  const isSymmetric = softIron.every(
+    (row, i) => row.every((value, j) => Math.abs(value - softIron[j][i]) <= tolerance),
+  );
+  return {
+    hardIron,
+    softIron,
+    warning: isSymmetric ? null : "soft-iron matrix is not symmetric; double-check the capture",
+  };
+}
+
+/**
+ * Fit a capture and derive the coefficients - the browser equivalent of
+ * `magcal.calibration.build_calibration`.
+ *
+ * Returns `{ fieldStrength, numPoints, hardIron, softIron, warning }`.  All coordinates are
+ * microTesla, as in the Python tool.
+ */
+function buildCalibration(samples, fieldStrength) {
+  const rows = validateSamples(samples);
+  const S = scatterMatrix(rows);
+  let direction;
+  try {
+    direction = fitDirection(pencilMatrix(S)).direction;
+  } catch (error) {
+    if (error instanceof LinAlgError) {
+      throw new ValueError(
+        "ellipsoid fit is not positive definite: the capture does not span enough "
+        + "directions for a reliable calibration",
+      );
+    }
+    throw error;
+  }
+  const bottomRight = S.slice(6).map((row) => row.slice(6));
+  const bottomLeft = S.slice(6).map((row) => row.slice(0, 6));
+  const v2 = matvec(solve(bottomRight, bottomLeft), direction).map((value) => -value);
+  const fit = {
+    shape: [
+      [direction[0], direction[5], direction[4]],
+      [direction[5], direction[1], direction[3]],
+      [direction[4], direction[3], direction[2]],
+    ],
+    offset: [v2[0], v2[1], v2[2]],
+    constant: v2[3],
+  };
+  const { hardIron, softIron, warning } = biasAndMatrix(fit, fieldStrength);
+  return {
+    fieldStrength: Number(fieldStrength),
+    numPoints: rows.length,
+    hardIron,
+    softIron,
+    warning,
+  };
+}
+
+/** Return `A_1 (x - b)`, i.e. one calibrated sample (mirrors `Calibration.apply`). */
+function applyCalibration(calibration, sample) {
+  const centred = sample.map((value, index) => value - calibration.hardIron[index]);
+  return calibration.softIron.map((axis) => axis.reduce(
+    (sum, value, index) => sum + value * centred[index], 0,
+  ));
+}
+
+/** Return the calibrated samples of a whole capture. */
+function applyCalibrationAll(calibration, samples) {
+  return samples.map((sample) => applyCalibration(calibration, sample));
+}
+
+return { C_CONSTRAINT, MIN_SAMPLES, ValueError, applyCalibration, applyCalibrationAll, biasAndMatrix, buildCalibration, fitDirection, pencilMatrix, scatterMatrix, validateSamples };
+})();
+
+// --- web/js/diagnostics.js -----------------------------------------
+const __magcal_diagnostics = (function () {
+const { applyCalibration } = __magcal_fit;
+const { formatGauss } = __magcal_format;
+const { jacobiEigh } = __magcal_linalg;
+/**
+ * Calibration diagnostics - browser port of `magcal/diagnostics.py`.
+ *
+ * `evaluate` is the quality metric the tool is built around: after a correct calibration
+ * `|B|` is constant and equal to the expected field strength, so the RMS residual of the
+ * calibrated samples is the pass/fail number.  The coverage ratio (`min/max` axis span) says
+ * whether the capture constrained all three axes at all.
+ */
+
+
+
+
+const DEFAULT_MAX_ERROR_PERCENT = 5.0;
+const COVERAGE_WARN_RATIO = 0.3;
+const AXES = "xyz";
+
+/** Circle-safe statistics of one magnitude series. */
+function magnitudeStats(samples, fieldStrength, transform) {
+  const magnitudes = samples.map((sample) => Math.hypot(...(transform ? transform(sample) : sample)));
+  const mean = magnitudes.reduce((sum, value) => sum + value, 0) / magnitudes.length;
+  let squared = 0;
+  magnitudes.forEach((value) => {
+    squared += (value - fieldStrength) ** 2;
+  });
+  const rms = Math.sqrt(squared / magnitudes.length);
+  let spread = 0;
+  magnitudes.forEach((value) => {
+    spread += (value - mean) ** 2;
+  });
+  return {
+    mean,
+    std: Math.sqrt(spread / magnitudes.length),
+    min: Math.min(...magnitudes),
+    max: Math.max(...magnitudes),
+    rmsError: rms,
+    percentError: fieldStrength ? (100 * rms) / Math.abs(fieldStrength) : null,
+  };
+}
+
+/** Return the per-axis span and the coverage ratio of a capture. */
+function axisSpans(samples) {
+  const spans = [0, 1, 2].map((axis) => {
+    let low = Infinity;
+    let high = -Infinity;
+    samples.forEach((sample) => {
+      low = Math.min(low, sample[axis]);
+      high = Math.max(high, sample[axis]);
+    });
+    return high - low;
+  });
+  const widest = Math.max(...spans);
+  return {
+    spans,
+    coverageRatio: widest > 0 ? Math.min(...spans) / widest : 0,
+  };
+}
+
+/**
+ * Return the eigenvalues of the sample covariance matrix, largest first.
+ *
+ * `numpy.cov` (which `magcal.diagnostics.evaluate` uses) is the *unbiased* estimator, so the
+ * divisor is `N - 1` - a difference of 0.4% on a 243 sample capture, far too large to hide
+ * behind a tolerance.
+ */
+function covarianceEigenvalues(samples) {
+  const count = samples.length;
+  const divisor = count > 1 ? count - 1 : 1;
+  const means = [0, 1, 2].map(
+    (axis) => samples.reduce((sum, sample) => sum + sample[axis], 0) / count,
+  );
+  const covariance = [0, 1, 2].map((i) => [0, 1, 2].map((j) => {
+    let total = 0;
+    samples.forEach((sample) => {
+      total += (sample[i] - means[i]) * (sample[j] - means[j]);
+    });
+    return total / divisor;
+  }));
+  return jacobiEigh(covariance).values.slice().reverse();
+}
+
+/**
+ * Score a capture against the expected field strength (`magcal.diagnostics.evaluate`).
+ *
+ * `calibrated` is optional: without it the raw numbers are reported, with it the residual
+ * of the calibrated samples is the classic quality metric.  The coverage ratio says whether
+ * the capture constrained all three axes, and `passed` mirrors `--strict`.
+ */
+function evaluate(samples, calibrated = null, fieldStrength = null,
+  maxErrorPercent = DEFAULT_MAX_ERROR_PERCENT) {
+  if (fieldStrength === null || fieldStrength === undefined) {
+    throw new Error("field_strength is required to evaluate a capture");
+  }
+  const { spans, coverageRatio } = axisSpans(samples);
+  const eigenvalues = covarianceEigenvalues(samples);
+  const smallest = eigenvalues[eigenvalues.length - 1];
+  const diagnostics = {
+    targetFieldStrength: Number(fieldStrength),
+    raw: magnitudeStats(samples, fieldStrength),
+    axisSpansRaw: { x: spans[0], y: spans[1], z: spans[2] },
+    coverageRatio,
+    covarianceEigenvalues: eigenvalues,
+    conditionNumber: smallest > 0 ? eigenvalues[0] / smallest : null,
+    maxErrorPercent: Number(maxErrorPercent),
+    calibrated: calibrated === null ? null : magnitudeStats(calibrated, fieldStrength),
+    warnings: [],
+  };
+  const measured = diagnostics.calibrated || diagnostics.raw;
+  diagnostics.percentError = measured.percentError;
+  diagnostics.passed = measured.percentError !== null
+    && measured.percentError <= maxErrorPercent;
+  if (coverageRatio < COVERAGE_WARN_RATIO) {
+    const weakest = spans.indexOf(Math.min(...spans));
+    diagnostics.warnings.push(
+      `${AXES[weakest].toUpperCase()} axis span is only ${(100 * coverageRatio).toFixed(1)}% `
+      + "of the widest axis; the ellipsoid fit is poorly constrained - redo the capture "
+      + "rotating the sensor through all three axes",
+    );
+  }
+  if (calibrated !== null && !diagnostics.passed) {
+    diagnostics.warnings.push(
+      `residual error ${measured.percentError.toFixed(2)}% exceeds the `
+      + `${maxErrorPercent.toFixed(2)}% target`,
+    );
+  }
+  return diagnostics;
+}
+
+/** Circular mean and dispersion of an angle series, in degrees. */
+function circularStats(degrees) {
+  const radians = degrees.map((value) => (value * Math.PI) / 180);
+  const meanSin = radians.reduce((sum, value) => sum + Math.sin(value), 0) / radians.length;
+  const meanCos = radians.reduce((sum, value) => sum + Math.cos(value), 0) / radians.length;
+  const resultant = Math.hypot(meanSin, meanCos);
+  return {
+    circular_mean_deg: (((Math.atan2(meanSin, meanCos) * 180) / Math.PI) + 360) % 360,
+    circular_std_deg: (Math.sqrt(-2 * Math.log(Math.max(resultant, 1e-12))) * 180) / Math.PI,
+  };
+}
+
+/**
+ * Heading statistics using the HMC5883L convention `atan2(0 - x, y)`.
+ *
+ * Heading is independent of the field strength (it only scales the magnitude); the
+ * calibration matters because of the off-diagonal soft-iron cross-talk terms.
+ */
+function headingStatistics(samples, calibrated = null, declination = 0) {
+  const degrees = (value) => (value * 180) / Math.PI;
+  const normalise = (value) => ((value % 360) + 360) % 360;
+  const rawHeading = samples.map((sample) => normalise(degrees(Math.atan2(-sample[0], sample[1]))));
+  const report = {
+    declination_deg: Number(declination),
+    convention: "atan2(0 - x, y) (HMC5883L)",
+    raw: circularStats(rawHeading),
+  };
+  if (calibrated !== null) {
+    const trueHeading = calibrated.map((sample) => normalise(
+      degrees(Math.atan2(-sample[0], sample[1])) + Number(declination),
+    ));
+    const differences = trueHeading.map(
+      (value, index) => (((value - rawHeading[index] + 180) % 360) + 360) % 360 - 180,
+    );
+    const mean = differences.reduce((sum, value) => sum + value, 0) / differences.length;
+    const variance = differences.reduce((sum, value) => sum + (value - mean) ** 2, 0)
+      / differences.length;
+    report.calibrated_true = circularStats(trueHeading);
+    report.shift_calibrated_minus_raw_deg = {
+      mean,
+      std: Math.sqrt(variance),
+      max_abs: Math.max(...differences.map(Math.abs)),
+    };
+  }
+  return report;
+}
+
+/** Render a residual/coverage report as human readable text (the CLI's `--report text`). */
+function formatDiagnostics(report) {
+  const raw = report.raw;
+  const calibrated = report.calibrated || null;
+  const lines = [
+    "",
+    "Calibration quality (target |B| = "
+      + `${formatGauss(report.targetFieldStrength, 12)} microTesla):`,
+    `  ${"".padEnd(22)}${"raw".padStart(12)}${calibrated ? "calibrated".padStart(14) : ""}`,
+  ];
+  const addRow = (label, key) => {
+    let line = `  ${label.padEnd(22)}${raw[key].toFixed(2).padStart(12)}`;
+    if (calibrated) {
+      line += calibrated[key].toFixed(2).padStart(14);
+    }
+    lines.push(line);
+  };
+  addRow("|B| mean", "mean");
+  addRow("|B| std", "std");
+  addRow("|B| min", "min");
+  addRow("|B| max", "max");
+  addRow("RMS error", "rmsError");
+  addRow("error %", "percentError");
+  const spans = report.axisSpansRaw;
+  lines.push(`  ${"axis spans (raw)".padEnd(24)}`
+    + AXES.split("").map((axis) => `${axis.toUpperCase()}=${spans[axis].toFixed(1)}`).join(", "));
+  lines.push(`  ${"coverage (min/max span)".padEnd(24)}${(100 * report.coverageRatio).toFixed(1)}%`);
+  if (report.conditionNumber) {
+    lines.push(`  ${"covariance condition".padEnd(24)}${report.conditionNumber.toFixed(1)}`);
+  }
+  lines.push(`  ${"result".padEnd(24)}${report.passed ? "PASS" : "FAIL"}`);
+  report.warnings.forEach((warning) => {
+    lines.push(`  warning: ${warning}`);
+  });
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** Render a heading report as human readable text (`magcal.diagnostics.format_heading`). */
+function formatHeading(report) {
+  const raw = report.raw;
+  const lines = [
+    "",
+    `Heading report (declination ${formatGauss(report.declination_deg, 12)} deg, `
+      + `convention ${report.convention}):`,
+    `  ${"raw".padEnd(34)} mean ${raw.circular_mean_deg.toFixed(2).padStart(7)} deg, `
+      + `spread ${raw.circular_std_deg.toFixed(2).padStart(6)} deg`,
+  ];
+  if (report.calibrated_true) {
+    const calibrated = report.calibrated_true;
+    const shift = report.shift_calibrated_minus_raw_deg;
+    lines.push(`  ${"calibrated + declination".padEnd(34)} mean `
+      + `${calibrated.circular_mean_deg.toFixed(2).padStart(7)} deg, `
+      + `spread ${calibrated.circular_std_deg.toFixed(2).padStart(6)} deg`);
+    lines.push(`  ${"shift (calibrated - raw)".padEnd(34)} mean `
+      + `${shift.mean.toFixed(2).padStart(7)} deg, max ${shift.max_abs.toFixed(2).padStart(6)} deg`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+return { COVERAGE_WARN_RATIO, DEFAULT_MAX_ERROR_PERCENT, axisSpans, circularStats, covarianceEigenvalues, evaluate, formatDiagnostics, formatHeading, headingStatistics, magnitudeStats };
+})();
+
+// --- web/js/loaders.js ---------------------------------------------
+const __magcal_loaders = (function () {
+const { ValueError } = __magcal_errors;
+/**
+ * Input parsing - browser port of `magcal/loaders.py`.
+ *
+ * Accepts what the CLI accepts: comma / semicolon / tab / whitespace separated rows, an
+ * optional header that names the axes (and the unit, e.g. `mag_x_uT`), raw ESPHome/serial
+ * log lines, and an explicit extract-pattern regex.  The parse report keeps the CLI's
+ * snake_case keys so the `--report json` `input` section can be reproduced exactly.
+ */
+
+
+const MICROTESLA_PER_GAUSS = 100.0;
+const NANOTESLA_PER_MICROTESLA = 1000.0;
+const MICROTESLA_PER_TESLA = 1.0e6;
+
+/** Header used for a written calibrated CSV (mirrors `magcal.constants`). */
+const DEFAULT_CALIBRATED_HEADER = ["mag_x_ut", "mag_y_ut", "mag_z_ut"];
+
+const UNIT_TO_MICROTESLA = {
+  gauss: MICROTESLA_PER_GAUSS,
+  microtesla: 1.0,
+  nanotesla: 1.0 / NANOTESLA_PER_MICROTESLA,
+  tesla: MICROTESLA_PER_TESLA,
+};
+
+const UNIT_SUFFIXES = {
+  g: "gauss", ga: "gauss", gs: "gauss", gauss: "gauss",
+  ut: "microtesla", microtesla: "microtesla",
+  nt: "nanotesla", nanotesla: "nanotesla",
+  t: "tesla", tesla: "tesla",
+};
+
+const AXIS_ALIASES = { x: 0, xm: 0, y: 1, ym: 1, z: 2, zm: 2 };
+
+const FLOAT_SOURCE = "[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?";
+
+/**
+ * Matches the last three numbers of a line, separated by `,`, `;` or TAB.
+ *
+ * Used to read raw ESPHome/serial logs such as `[12:34:56][D][main:090]: 33.1,98.3,571.2`.
+ */
+const DEFAULT_EXTRACT_PATTERN
+  = `(${FLOAT_SOURCE})\\s*[,;\\t]\\s*(${FLOAT_SOURCE})\\s*[,;\\t]\\s*(${FLOAT_SOURCE})\\s*$`;
+
+/** Return an empty parse report (the CLI's snake_case keys, `magcal.model.ParseReport`). */
+function createReport() {
+  return {
+    rows_total: 0,
+    rows_used: 0,
+    rows_skipped: 0,
+    delimiter: null,
+    header: null,
+    header_used: false,
+    unit: null,
+    unit_source: "undetected",
+    log_format: false,
+    source: null,
+    input_unit: null,
+  };
+}
+
+/** Parse a numeric token, returning null when it is not a finite number (`_to_float`). */
+function toFloat(token) {
+  if (typeof token !== "string" || token.trim() === "") {
+    return null;
+  }
+  const value = Number(token);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Split a column name into lowercase alphanumeric tokens (`mag_x_uT` -> mag, x, ut). */
+function columnTokens(name) {
+  return String(name).toLowerCase().replace(/\u00b5/g, "u")
+    .split(/[^0-9a-z]+/)
+    .filter((token) => token.length > 0);
+}
+
+/** Infer the unit from a column name suffix, or null when undetectable. */
+function unitFromColumn(name) {
+  const tokens = columnTokens(name);
+  if (tokens.length === 0) {
+    return null;
+  }
+  return UNIT_SUFFIXES[tokens[tokens.length - 1]] || null;
+}
+
+/** Return the axis index (0=x, 1=y, 2=z) named by a column, or null. */
+function axisFromColumn(name) {
+  for (const token of columnTokens(name)) {
+    if (Object.prototype.hasOwnProperty.call(AXIS_ALIASES, token)) {
+      return AXIS_ALIASES[token];
+    }
+  }
+  return null;
+}
+
+/** Map X/Y/Z onto column positions using header names; returns `[mapping, unit]`. */
+function mapColumns(headerCells) {
+  const mapping = {};
+  const units = new Set();
+  headerCells.forEach((cell, index) => {
+    const axis = axisFromColumn(cell);
+    if (axis === null || Object.prototype.hasOwnProperty.call(mapping, axis)) {
+      return;
+    }
+    mapping[axis] = index;
+    const unit = unitFromColumn(cell);
+    if (unit !== null) {
+      units.add(unit);
+    }
+  });
+  if (mapping[0] !== undefined && mapping[1] !== undefined && mapping[2] !== undefined
+    && units.size === 1) {
+    return [mapping, [...units][0]];
+  }
+  const complete = mapping[0] !== undefined && mapping[1] !== undefined && mapping[2] !== undefined;
+  return [complete ? mapping : {}, null];
+}
+
+/** True for a comment line (`#`, `//` or `;`). */
+function isComment(line) {
+  const stripped = line.replace(/^\s+/, "");
+  return stripped.startsWith("#") || stripped.startsWith("//") || stripped.startsWith(";");
+}
+
+/** Count the capturing groups of a regular expression source (Python's `re.groups`). */
+function countCaptureGroups(source) {
+  let count = 0;
+  let escaped = false;
+  let inClass = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (inClass) {
+      inClass = character !== "]";
+    } else if (character === "[") {
+      inClass = true;
+    } else if (character === "(") {
+      const ahead = source.slice(index + 1, index + 4);
+      const named = ahead.startsWith("?<") && !ahead.startsWith("?<=") && !ahead.startsWith("?<!");
+      if (source[index + 1] !== "?" || named) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+/** Split one record with the detected delimiter, honouring double quotes (`csv.reader`). */
+function splitFields(line, delimiter) {
+  if (delimiter === null || delimiter === undefined) {
+    return line.trim().split(/\s+/).filter((field) => field.length > 0);
+  }
+  const fields = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (quoted) {
+      if (character === '"') {
+        if (line[index + 1] === '"') {
+          current += '"';
+          index += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        current += character;
+      }
+    } else if (character === '"' && current.trim() === "") {
+      quoted = true;
+      current = "";
+    } else if (character === delimiter) {
+      fields.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+/** Pick the first candidate delimiter that yields three or more fields per line. */
+function sniffDelimiter(lines) {
+  const candidates = [",", ";", "\t", null];
+  const counts = new Map(candidates.map((candidate) => [candidate, 0]));
+  lines.slice(0, 50).forEach((line) => {
+    if (line.trim() === "" || isComment(line)) {
+      return;
+    }
+    candidates.forEach((candidate) => {
+      if (splitFields(line, candidate).length >= 3) {
+        counts.set(candidate, counts.get(candidate) + 1);
+      }
+    });
+  });
+  for (const candidate of candidates) {
+    if (counts.get(candidate) > 0) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** Convert one split record into `[x, y, z]`, or null when it is unusable. */
+function rowToSample(fields, headerMap) {
+  let values;
+  const mapped = headerMap && Object.keys(headerMap).length === 3;
+  if (mapped) {
+    const indexes = [headerMap[0], headerMap[1], headerMap[2]];
+    if (Math.max(...indexes) >= fields.length) {
+      return null;
+    }
+    values = indexes.map((index) => fields[index]);
+  } else {
+    if (fields.length < 3) {
+      return null;
+    }
+    values = fields.slice(-3);
+  }
+  const parsed = values.map(toFloat);
+  return parsed.some((value) => value === null) ? null : parsed;
+}
+
+/** Extract one sample per line with a regex exposing three groups (`--extract-pattern`). */
+function parseWithPattern(lines, pattern, report) {
+  if (countCaptureGroups(pattern) < 3) {
+    throw new ValueError("--extract-pattern must expose at least 3 capture groups (x, y, z)");
+  }
+  let regex;
+  try {
+    regex = new RegExp(pattern);
+  } catch (error) {
+    throw new ValueError(`invalid --extract-pattern regular expression: ${error.message}`);
+  }
+  const rows = [];
+  lines.forEach((line) => {
+    if (line.trim() === "" || isComment(line)) {
+      return;
+    }
+    report.rows_total += 1;
+    const match = regex.exec(line);
+    const values = match ? [match[1], match[2], match[3]].map(toFloat) : [];
+    if (match === null || values.some((value) => value === null)) {
+      report.rows_skipped += 1;
+      return;
+    }
+    rows.push(values);
+  });
+  report.rows_used = rows.length;
+  return rows;
+}
+
+/**
+ * Parse the delimiter separated records of a capture.
+ *
+ * Returns `[samples, wideRows]`, where `wideRows` counts rows with more than four columns and
+ * no header naming the axes - usually a file that needs a header.
+ */
+function readDelimitedSamples(lines, report) {
+  const delimiter = sniffDelimiter(lines);
+  report.delimiter = delimiter === null ? "whitespace" : delimiter;
+  let headerMap = {};
+  const rows = [];
+  let wideRows = 0;
+  lines.forEach((line) => {
+    if (line.trim() === "" || isComment(line)) {
+      return;
+    }
+    report.rows_total += 1;
+    const fields = splitFields(line, delimiter);
+    if (Object.keys(headerMap).length === 0 && !report.header_used
+      && fields.some((field) => toFloat(field) === null)) {
+      report.header_used = true;
+      report.header = fields;
+      const [mapping, unit] = mapColumns(fields);
+      if (unit !== null) {
+        report.unit = unit;
+        report.unit_source = "header";
+      }
+      if (Object.keys(mapping).length === 3) {
+        headerMap = mapping;
+      }
+      report.rows_skipped += 1;
+      return;
+    }
+    if (fields.length > 4 && Object.keys(headerMap).length === 0) {
+      wideRows += 1;
+      report.rows_skipped += 1;
+      return;
+    }
+    const sample = rowToSample(fields, headerMap);
+    if (sample === null) {
+      report.rows_skipped += 1;
+      return;
+    }
+    rows.push(sample);
+  });
+  report.rows_used = rows.length;
+  return [rows, wideRows];
+}
+
+/** Retry a capture as raw ESPHome/serial log lines; returns null when nothing matched. */
+function extractLogSamples(lines, report) {
+  const logReport = createReport();
+  const samples = parseWithPattern(lines, DEFAULT_EXTRACT_PATTERN, logReport);
+  if (samples.length === 0) {
+    return null;
+  }
+  report.rows_total = logReport.rows_total;
+  report.rows_used = logReport.rows_used;
+  report.rows_skipped = logReport.rows_skipped;
+  report.delimiter = "regex";
+  report.log_format = true;
+  return samples;
+}
+
+/**
+ * Parse magnetometer samples from text; returns `[samples, report]` (`_parse_samples`).
+ *
+ * Raises `ValueError` with the CLI's wording when nothing usable is found.
+ */
+function parseSamples(text, extractPattern = null, source = null) {  const lines = text.split(/\r\n|\r|\n/);
+  const report = createReport();
+  report.source = source;
+  if (extractPattern) {
+    const samples = parseWithPattern(lines, extractPattern, report);
+    report.delimiter = "regex";
+    report.log_format = true;
+    if (samples.length === 0) {
+      throw new ValueError("no samples matched --extract-pattern; check the regular expression");
+    }
+    return [samples, report];
+  }
+  const [samples, wideRows] = readDelimitedSamples(lines, report);
+  if (samples.length === 0 && wideRows > 0) {
+    throw new ValueError(
+      "no samples parsed: the file has more than 4 columns and no header naming x/y/z; "
+      + "add a header (e.g. 'time,mag_x,mag_y,mag_z') or select the columns first",
+    );
+  }
+  if (samples.length === 0) {
+    const logSamples = extractLogSamples(lines, report);
+    if (logSamples !== null) {
+      return [logSamples, report];
+    }
+    throw new ValueError(
+      "no magnetometer samples found in the input; expected numeric x,y,z rows "
+      + "(use --extract-pattern for log files with extra text)",
+    );
+  }
+  return [samples, report];
+}
+
+/** Euclidean distance between two samples. */
+function distance(left, right) {
+  return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]);
+}
+
+/** Deterministic 32 bit PRNG (mulberry32): the documented stand-in for numpy's PCG64. */
+function createRandom(seed) {
+  let state = (Number(seed) || 0) >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Pick `count` distinct indices below `size` (partial Fisher-Yates). */
+function pickIndices(size, count, seed) {
+  const random = createRandom(seed);
+  const pool = [];
+  for (let index = 0; index < size; index += 1) {
+    pool.push(index);
+  }
+  for (let index = 0; index < count; index += 1) {
+    const swap = index + Math.floor(random() * (size - index));
+    const temporary = pool[index];
+    pool[index] = pool[swap];
+    pool[swap] = temporary;
+  }
+  return pool.slice(0, count);
+}
+
+/**
+ * Drop parked/duplicate samples (`--min-delta`) and optionally subsample (`--max-points`).
+ *
+ * Returns `[filtered, report]` with the CLI's snake_case filter report.  The subsample uses a
+ * seeded JavaScript PRNG rather than numpy's PCG64, so `--max-points` keeps a different - but
+ * equally valid and reproducible - subset than the CLI (see docs/web-app.md).
+ */
+function filterSamples(samples, minDelta = 0.0, maxPoints = null, seed = 0) {
+  const delta = Number(minDelta) || 0;
+  const kept = [];
+  let last = null;
+  samples.forEach((sample, index) => {
+    if (index === 0 || distance(sample, last) >= delta) {
+      kept.push(index);
+      last = sample;
+    }
+  });
+  let filtered = kept.map((index) => samples[index]);
+  const report = {
+    input: samples.length,
+    after_min_delta: filtered.length,
+    min_delta: delta,
+    max_points: maxPoints ? Number(maxPoints) : null,
+    subsampled: false,
+    kept: filtered.length,
+  };
+  if (maxPoints && filtered.length > Number(maxPoints)) {
+    const picked = pickIndices(filtered.length, Number(maxPoints), seed);
+    picked.sort((left, right) => left - right);
+    filtered = picked.map((index) => filtered[index]);
+    report.subsampled = true;
+    report.kept = filtered.length;
+  }
+  return [filtered, report];
+}
+
+/**
+ * Return the calibrated samples as CSV text with six decimals.
+ *
+ * Mirrors `magcal.loaders.write_calibrated_data`, including the CRLF line endings that
+ * Python's `csv.writer` produces.
+ */
+function writeCalibratedCsv(samples, header = DEFAULT_CALIBRATED_HEADER) {
+  const lines = [];
+  if (header && header.length) {
+    lines.push(header.join(","));
+  }
+  samples.forEach((sample) => {
+    lines.push(sample.map((value) => value.toFixed(6)).join(","));
+  });
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+return { AXIS_ALIASES, DEFAULT_CALIBRATED_HEADER, DEFAULT_EXTRACT_PATTERN, MICROTESLA_PER_GAUSS, MICROTESLA_PER_TESLA, NANOTESLA_PER_MICROTESLA, UNIT_SUFFIXES, UNIT_TO_MICROTESLA, axisFromColumn, columnTokens, countCaptureGroups, createRandom, createReport, extractLogSamples, filterSamples, isComment, mapColumns, parseSamples, parseWithPattern, readDelimitedSamples, rowToSample, sniffDelimiter, splitFields, toFloat, unitFromColumn, writeCalibratedCsv };
+})();
+
+// --- web/js/export.js ----------------------------------------------
+const __magcal_export = (function () {
+const { formatGauss, formatSix } = __magcal_format;
+/**
+ * Text exports: the historic C / JSON blocks and the ESPHome lambda.
+ *
+ * Byte-for-byte ports of `magcal/serialization.py` and `magcal/esphome.py`: the expected
+ * strings live in `web/tests/golden/python-golden.json`, produced by the Python tool, so a
+ * formatting difference shows up as a hard test failure rather than a silent drift.
+ */
+
+
+const SEPARATOR = "=".repeat(50);
+const AXES = ["x", "y", "z"];
+
+/** Return the `{constant name: value}` map used by the C code and the ESPHome lambda. */
+function constantValues(calibration) {
+  const values = {};
+  AXES.forEach((axis, index) => {
+    values[`hard_iron_bias_${axis}`] = calibration.hardIron[index];
+  });
+  AXES.forEach((rowAxis, rowIndex) => {
+    AXES.forEach((columnAxis, columnIndex) => {
+      values[`soft_iron_bias_${rowAxis}${columnAxis}`]
+        = calibration.softIron[rowIndex][columnIndex];
+    });
+  });
+  return values;
+}
+
+/** Return the historic C code block (byte compatible with the original tool). */
+function renderCCode(calibration) {
+  const { hardIron, softIron } = calibration;
+  const lines = [
+    `\n${SEPARATOR}`,
+    "C Code for calibration parameters:",
+    SEPARATOR,
+    `float hard_iron_bias_x = ${formatSix(hardIron[0])};`,
+    `float hard_iron_bias_y = ${formatSix(hardIron[1])};`,
+    `float hard_iron_bias_z = ${formatSix(hardIron[2])};`,
+    "",
+    `double soft_iron_bias_xx = ${formatSix(softIron[0][0])};`,
+    `double soft_iron_bias_xy = ${formatSix(softIron[0][1])};`,
+    `double soft_iron_bias_xz = ${formatSix(softIron[0][2])};`,
+    "",
+    `double soft_iron_bias_yx = ${formatSix(softIron[1][0])};`,
+    `double soft_iron_bias_yy = ${formatSix(softIron[1][1])};`,
+    `double soft_iron_bias_yz = ${formatSix(softIron[1][2])};`,
+    "",
+    `double soft_iron_bias_zx = ${formatSix(softIron[2][0])};`,
+    `double soft_iron_bias_zy = ${formatSix(softIron[2][1])};`,
+    `double soft_iron_bias_zz = ${formatSix(softIron[2][2])};`,
+    SEPARATOR,
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+/** Return the historic four-key JSON block. */
+function renderJsonBlock(calibration) {
+  const payload = {
+    hard_iron_bias: calibration.hardIron.map(Number),
+    soft_iron_matrix: calibration.softIron.map((row) => row.map(Number)),
+    magnetic_field_strength: Number(calibration.fieldStrength),
+    unit: "microtesla",
+  };
+  return `\n${SEPARATOR}\nJSON format for calibration parameters:\n${SEPARATOR}\n`
+    + `${JSON.stringify(payload, null, 4)}\n${SEPARATOR}\n`;
+}
+
+/**
+ * Return the paste-ready ESPHome lambda computing the (true) heading.
+ *
+ * Mirrors `magcal.esphome.build_lambda`: the same layout, the same `atan2(0 - xm_cal,
+ * ym_cal)` convention as `esphome_code.yaml`, and the same 12-significant-digit values.
+ * Tilt compensation is not included (it needs an accelerometer).
+ */
+function renderEsphomeLambda(calibration, { declination = null, indent = "        " } = {}) {
+  const values = constantValues(calibration);
+  const lines = [
+    "// Calibration generated by calibrate.py",
+    `float hard_iron_bias_x = ${formatGauss(values.hard_iron_bias_x)};`,
+    `float hard_iron_bias_y = ${formatGauss(values.hard_iron_bias_y)};`,
+    `float hard_iron_bias_z = ${formatGauss(values.hard_iron_bias_z)};`,
+    "",
+  ];
+  AXES.forEach((rowAxis) => {
+    AXES.forEach((columnAxis) => {
+      const name = `soft_iron_bias_${rowAxis}${columnAxis}`;
+      lines.push(`double ${name} = ${formatGauss(values[name])};`);
+    });
+    lines.push("");
+  });
+  lines.push(
+    "// get values x,y,z and subtract the hard iron offset",
+    "float xm_off = id(hmc5883l_x).state - hard_iron_bias_x;",
+    "float ym_off = id(hmc5883l_y).state - hard_iron_bias_y;",
+    "float zm_off = id(hmc5883l_z).state - hard_iron_bias_z;",
+    "",
+    "// multiply by the inverse soft iron offset",
+    "float xm_cal = xm_off * soft_iron_bias_xx + ym_off * soft_iron_bias_yx"
+      + " + zm_off * soft_iron_bias_zx;",
+    "float ym_cal = xm_off * soft_iron_bias_xy + ym_off * soft_iron_bias_yy"
+      + " + zm_off * soft_iron_bias_zy;",
+    "",
+    "float heading = atan2(0 - xm_cal, ym_cal);",
+  );
+  if (declination !== null && declination !== undefined) {
+    lines.push(
+      `float magnetic_declination = ${formatGauss(Number(declination))};`,
+      "heading += magnetic_declination * PI / 180.0f;",
+    );
+  }
+  lines.push(
+    "if (heading < 0) { heading += 2*PI; }",
+    "if (heading > 2*PI) { heading -= 2*PI; }",
+    "return heading * 180/M_PI;",
+  );
+  return lines.map((line) => (line ? indent + line : "")).join("\n");
+}
+
+/** The twelve constant names shared by the C block and the ESPHome lambda. */
+const ESPHOME_CONSTANT_NAMES = [
+  ...["x", "y", "z"].map((axis) => `hard_iron_bias_${axis}`),
+  ...["x", "y", "z"].flatMap((row) => ["x", "y", "z"].map((column) => `soft_iron_bias_${row}${column}`)),
+];
+
+/**
+ * Replace the twelve calibration constants inside an ESPHome YAML file.
+ *
+ * All-or-nothing, exactly like `magcal.esphome.update_esphome_file`: the patched text is
+ * returned only when *every* constant was found, and the caller downloads it.  A browser
+ * cannot write in place, so the original file is never touched and no `.bak` is needed.
+ *
+ * Returns `{ text, replacements }` and raises `ValueError` listing the missing constants.
+ */
+function patchEsphomeYaml(text, calibration) {
+  const values = constantValues(calibration);
+  const missing = [];
+  let updated = text;
+  let replacements = 0;
+  ESPHOME_CONSTANT_NAMES.forEach((name) => {
+    const pattern = new RegExp(`(\\b${name}\\s*=\\s*)([^;]*)(;)`, "g");
+    const found = (updated.match(pattern) || []).length;
+    if (found === 0) {
+      missing.push(name);
+      return;
+    }
+    updated = updated.replace(pattern, (match, head, value, tail) => head
+      + formatGauss(values[name]) + tail);
+    replacements += found;
+  });
+  if (missing.length > 0) {
+    throw new ValueError(
+      `could not find these calibration constants: ${missing.sort().join(", ")}`,
+    );
+  }
+  return { text: updated, replacements };
+}
+
+return { ESPHOME_CONSTANT_NAMES, constantValues, patchEsphomeYaml, renderCCode, renderEsphomeLambda, renderJsonBlock };
+})();
+
+// --- web/js/plots.js -----------------------------------------------
+const __magcal_plots = (function () {
+/**
+ * Dependency-free SVG plots: the before/after projections and the `|B|` histogram.
+ *
+ * The CLI draws these with matplotlib; a static page cannot, so the port renders plain SVG
+ * instead (same information, no rendering library).  The histogram is the visual equivalent
+ * of the residual report: a correct calibration collapses every sample onto the target field.
+ */
+
+const SIZE = 260;
+const PAD = 30;
+
+/** Map a data value into an SVG coordinate. */
+function scale(value, low, high, direction) {
+  const span = high - low || 1;
+  const fraction = (value - low) / span;
+  return direction === "x" ? PAD + fraction * (SIZE - 2 * PAD) : SIZE - PAD - fraction * (SIZE - 2 * PAD);
+}
+
+/** Return a `<polyline>`/`<circle>` list for one sample set. */
+function points(samples, first, second, limits, colour, radius) {
+  return samples.map((sample) => {
+    const cx = scale(sample[first], limits.low, limits.high, "x");
+    const cy = scale(sample[second], limits.low, limits.high, "y");
+    return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius}" fill="${colour}" />`;
+  }).join("");
+}
+
+/** One projection panel: raw samples in grey behind the calibrated ones in red. */
+function projectionSvg(samples, calibrated, first, second, label) {
+  const values = samples.concat(calibrated).flatMap((sample) => [sample[first], sample[second]]);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const limits = { low, high };
+  return `<svg class="plot" viewBox="0 0 ${SIZE} ${SIZE}" width="${SIZE}" height="${SIZE}" role="img">
+  <rect x="${PAD}" y="${PAD}" width="${SIZE - 2 * PAD}" height="${SIZE - 2 * PAD}" fill="none" stroke="#d1d9e0" />
+  ${points(samples, first, second, limits, "#c8ccd1", 1.6)}
+  ${points(calibrated, first, second, limits, "#cf222e", 1.6)}
+  <text x="${SIZE / 2}" y="${SIZE - 8}" text-anchor="middle" font-size="11">${"xyz"[first]} (uT)</text>
+  <text x="10" y="${SIZE / 2}" font-size="11" transform="rotate(-90 10 ${SIZE / 2})"
+    text-anchor="middle">${"xyz"[second]} (uT)</text>
+  <text x="${PAD}" y="18" font-size="12">${label}</text>
+</svg>`;
+}
+
+/** Histogram of `|B|` before and after the calibration, with the target line. */
+function histogramSvg(samples, calibrated, fieldStrength) {
+  const magnitudes = (set) => set.map((sample) => Math.hypot(sample[0], sample[1], sample[2]));
+  const raw = magnitudes(samples);
+  const fixed = magnitudes(calibrated);
+  const all = raw.concat(fixed);
+  const low = Math.min(...all);
+  const high = Math.max(...all);
+  const bins = 30;
+  const width = (high - low) / bins || 1;
+  const counts = (values) => {
+    const result = new Array(bins).fill(0);
+    values.forEach((value) => {
+      const index = Math.min(bins - 1, Math.max(0, Math.floor((value - low) / width)));
+      result[index] += 1;
+    });
+    return result;
+  };
+  const rawCounts = counts(raw);
+  const fixedCounts = counts(fixed);
+  const peak = Math.max(...rawCounts, ...fixedCounts, 1);
+  const bar = (SIZE - 2 * PAD) / bins;
+  const bars = (values, colour, offset) => values.map((count, index) => {
+    const height = (count / peak) * (SIZE - 2 * PAD);
+    const x = PAD + index * bar + offset;
+    return `<rect x="${x.toFixed(1)}" y="${(SIZE - PAD - height).toFixed(1)}" width="${(bar / 2).toFixed(1)}"`
+      + ` height="${height.toFixed(1)}" fill="${colour}" />`;
+  }).join("");
+  const targetX = scale(fieldStrength, low, high, "x");
+  return `<svg class="plot" viewBox="0 0 ${SIZE} ${SIZE}" width="${SIZE}" height="${SIZE}" role="img">
+  <rect x="${PAD}" y="${PAD}" width="${SIZE - 2 * PAD}" height="${SIZE - 2 * PAD}" fill="none" stroke="#d1d9e0" />
+  ${bars(rawCounts, "#c8ccd1", 0)}
+  ${bars(fixedCounts, "#cf222e", bar / 2)}
+  <line x1="${targetX.toFixed(1)}" y1="${PAD}" x2="${targetX.toFixed(1)}" y2="${SIZE - PAD}"
+    stroke="#1f2328" stroke-dasharray="4 3" />
+  <text x="${SIZE / 2}" y="${SIZE - 8}" text-anchor="middle" font-size="11">|B| (uT)</text>
+  <text x="${PAD}" y="18" font-size="12">|B| before (grey) / after (red), target dashed</text>
+</svg>`;
+}
+
+/** Render every panel into `container` (replacing what was there). */
+function renderPlots(container, { samples, calibrated, fieldStrength }) {
+  container.innerHTML = [
+    "<h3>Projections</h3>",
+    '<div class="row">',
+    [[0, 1, "XY plane"], [0, 2, "XZ plane"], [1, 2, "YZ plane"]]
+      .map(([first, second, label]) => projectionSvg(samples, calibrated, first, second, label))
+      .join(""),
+    "</div>",
+    "<h3>Field magnitude</h3>",
+    '<div class="row">',
+    histogramSvg(samples, calibrated, fieldStrength),
+    "</div>",
+  ].join("\n");
+}
+
+return { renderPlots };
+})();
+
+// --- web/app.js
+const { applyCalibrationAll, buildCalibration } = __magcal_fit;
+const { evaluate, formatDiagnostics } = __magcal_diagnostics;
+const { UNIT_TO_MICROTESLA, filterSamples, parseSamples, writeCalibratedCsv } = __magcal_loaders;
+const { patchEsphomeYaml, renderCCode, renderEsphomeLambda, renderJsonBlock } = __magcal_export;
+const { renderPlots } = __magcal_plots;
+/**
+ * The web app: capture -> parse -> fit -> quality report -> exports.
+ *
+ * Everything runs locally; the only network request is the optional sample capture.  The
+ * numeric work lives in `./js/linalg.js`, `fit.js`, `diagnostics.js`, `loaders.js`,
+ * `format.js` and `export.js`, which `web/tests/parity.html` (and `tools/run_web_tests.py`)
+ * check against the Python implementation.
+ */
+
+
+
+
+
+
+/** The sample capture: as built for the site, then as checked out in the repository. */
+const SAMPLE_PATHS = ["./samples/mag_out_sample.txt", "../mag_out_sample.txt"];
+
+/**
+ * The bundled capture was recorded at about 515 microTesla - the value the README, the tests and
+ * the committed golden report use (see docs/gravitation-field.md).
+ *
+ * `A_1 = F/sqrt(k) * sqrtm(M)` is proportional to the expected field, and the `|B|` residual is
+ * field *invariant*, so a wrong value here cannot be detected from the quality report: it only
+ * makes every soft-iron entry wrong by the same factor.  Filling it in with the sample removes
+ * that trap for the one capture we ship.
+ */
+const SAMPLE_FIELD = 515;
+const AXES = ["x", "y", "z"];
+
+const ui = {};
+`capture-text input-report field unit min-delta max-points extract-pattern declination max-error
+ calibrate-button sample-button clear-button status file-input dropzone result-panel error-panel
+ error-text quality-badge field-note warnings hard-iron-table soft-iron-table plots report-text
+ report-json c-code esphome-lambda download-csv download-json copy-c copy-esphome esphome-file
+ esphome-report`.split(/\s+/).forEach((id) => { ui[id] = document.getElementById(id); });
+
+let state = null;       // { samples, calibration, calibrated, diagnostics, report }
+
+function setStatus(text) {
+  ui.status.textContent = text;
+}
+
+function showError(message) {
+  ui["error-text"].textContent = message;
+  ui["error-panel"].hidden = false;
+  ui["result-panel"].hidden = true;
+}
+
+function clearError() {
+  ui["error-panel"].hidden = true;
+  ui["error-text"].textContent = "";
+}
+
+function download(name, text, type = "text/plain") {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function copyText(text, button) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = button.textContent;
+    button.textContent = "Copied";
+    setTimeout(() => { button.textContent = original; }, 1200);
+  } catch (error) {
+    setStatus(`copy failed: ${error.message}`);
+  }
+}
+
+function numberValue(id, fallback) {
+  const raw = ui[id].value.trim();
+  if (raw === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * Parse the capture textarea and convert it to microTesla.
+ *
+ * Mirrors `MagnetometerCalibrator.load_data`: `auto` uses the unit found in the column names
+ * and falls back to microTesla, and an explicit unit overrides the header.
+ */
+function readCapture() {
+  const text = ui["capture-text"].value;
+  if (text.trim() === "") {
+    ui["input-report"].textContent = "no capture loaded yet";
+    return null;
+  }
+  const pattern = ui["extract-pattern"].value.trim() || null;
+  const [samples, report] = parseSamples(text, pattern, "pasted capture");
+  const requested = ui.unit.value;
+  const detected = report.unit;
+  const effective = requested === "auto" ? (detected || "microtesla") : requested;
+  report.unit_source = requested === "auto" ? (detected ? "header" : "default") : "argument";
+  report.input_unit = effective;
+  const factor = UNIT_TO_MICROTESLA[effective];
+  const converted = samples.map((sample) => sample.map((value) => value * factor));
+  const notes = [`${report.rows_used} of ${report.rows_total} rows used`,
+    `separator ${report.delimiter === " " ? "space" : JSON.stringify(report.delimiter)}`,
+    `unit ${effective}`];
+  if (report.header_used) {
+    notes.push(`header ${JSON.stringify(report.header)}`);
+  }
+  if (report.log_format) {
+    notes.push("raw log format");
+  }
+  if (requested !== "auto" && detected && detected !== requested) {
+    notes.push(`note: the header says ${detected}, using ${effective}`);
+  }
+  ui["input-report"].textContent = notes.join(" | ");
+  return { samples: converted, report };
+}
+
+function renderTable(element, headers, rows) {
+  const head = `<tr>${headers.map((cell) => `<th>${cell}</th>`).join("")}</tr>`;
+  const body = rows.map(
+    (row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`,
+  ).join("");
+  element.innerHTML = head + body;
+}
+
+function run() {
+  clearError();
+  let capture = null;
+  try {
+    capture = readCapture();
+  } catch (error) {
+    showError(error && error.message ? error.message : String(error));
+    return;
+  }
+  if (capture === null) {
+    showError("Load or paste a capture first.");
+    return;
+  }
+  const field = numberValue("field", 1000);
+  const maxError = numberValue("max-error", 5);
+  const minDelta = numberValue("min-delta", 0);
+  const maxPoints = ui["max-points"].value.trim() === "" ? null : numberValue("max-points", null);
+  let samples = capture.samples;
+  let filterReport = null;
+  if (minDelta > 0 || maxPoints) {
+    [samples, filterReport] = filterSamples(samples, minDelta, maxPoints, 0);
+  }
+  try {
+    setStatus("calibrating...");
+    const started = performance.now();
+    const calibration = buildCalibration(samples, field);
+    const calibrated = applyCalibrationAll(calibration, samples);
+    const diagnostics = evaluate(samples, calibrated, field, maxError);
+    const elapsed = performance.now() - started;
+    state = { samples, calibration, calibrated, diagnostics, report: capture.report, filterReport };
+    renderResult(elapsed);
+    setStatus(`${samples.length} samples fitted in ${elapsed.toFixed(1)} ms`);
+  } catch (error) {
+    setStatus("failed");
+    state = null;
+    showError(error && error.message ? error.message : String(error));
+  }
+}
+
+/** Build the JSON record (schema v2) that the CLI writes with `--json`. */
+function buildJsonRecord() {
+  const { calibration, diagnostics, report, samples, filterReport } = state;
+  const stats = (measured) => ({
+    mean: measured.mean,
+    std: measured.std,
+    min: measured.min,
+    max: measured.max,
+    rms_error: measured.rmsError,
+    percent_error: measured.percentError,
+  });
+  return {
+    version: 2,
+    created: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+    mode: "calibrate",
+    source_file: report.source,
+    num_points: samples.length,
+    magnetic_field_strength: calibration.fieldStrength,
+    unit: "microtesla",
+    hard_iron_bias: calibration.hardIron,
+    soft_iron_matrix: calibration.softIron,
+    diagnostics: {
+      target_field_strength: diagnostics.targetFieldStrength,
+      raw: stats(diagnostics.raw),
+      axis_spans_raw: diagnostics.axisSpansRaw,
+      coverage_ratio: diagnostics.coverageRatio,
+      covariance_eigenvalues: diagnostics.covarianceEigenvalues,
+      condition_number: diagnostics.conditionNumber,
+      max_error_percent: diagnostics.maxErrorPercent,
+      warnings: diagnostics.warnings,
+      calibrated: stats(diagnostics.calibrated),
+      percent_error: diagnostics.percentError,
+      passed: diagnostics.passed,
+    },
+    quality: {
+      passed: diagnostics.passed,
+      percent_error: diagnostics.percentError,
+      max_error_percent: diagnostics.maxErrorPercent,
+    },
+    input: report,
+    filter: filterReport,
+  };
+}
+
+/** Show everything the fit produced. */
+function renderResult(elapsed) {
+  const { calibration, calibrated, diagnostics, samples } = state;
+  ui["result-panel"].hidden = false;
+
+  ui["quality-badge"].textContent = `${diagnostics.passed ? "PASS" : "FAIL"} - residual |B| `
+    + `error ${diagnostics.percentError.toFixed(2)}% (target ${diagnostics.maxErrorPercent}%)`;
+  ui["quality-badge"].className = `badge ${diagnostics.passed ? "pass" : "fail"}`;
+  ui["field-note"].textContent = `expected field ${calibration.fieldStrength} microTesla - the `
+    + "soft-iron matrix scales linearly with it (double the field, double every entry), and the "
+    + "residual cannot detect a wrong value: check docs/gravitation-field.md for your location.";
+  ui.warnings.innerHTML = diagnostics.warnings
+    .map((warning) => `<p>warning: ${warning}</p>`).join("");
+
+  renderTable(ui["hard-iron-table"], ["axis", "microTesla"],
+    AXES.map((axis, index) => [axis.toUpperCase(), calibration.hardIron[index].toFixed(6)]));
+  renderTable(ui["soft-iron-table"], AXES.map((axis) => axis.toUpperCase()),
+    calibration.softIron.map((row) => row.map((value) => value.toFixed(6))));
+
+  try {
+    renderPlots(ui.plots, { samples, calibrated, fieldStrength: calibration.fieldStrength });
+  } catch (error) {
+    ui.plots.textContent = `plots unavailable: ${error.message}`;
+  }
+
+  state.text = {
+    diagnostics: formatDiagnostics(diagnostics),
+    cCode: renderCCode(calibration),
+    lambda: renderEsphomeLambda(calibration, { declination: numberValue("declination", 0) }),
+    jsonBlock: renderJsonBlock(calibration),
+    record: JSON.stringify(buildJsonRecord(), null, 4),
+  };
+  ui["report-text"].textContent = state.text.diagnostics;
+  ui["report-json"].textContent = state.text.record;
+  ui["c-code"].textContent = state.text.cCode;
+  ui["esphome-lambda"].textContent = state.text.lambda;
+  setStatus(`${samples.length} samples fitted in ${elapsed.toFixed(1)} ms`);
+}
+
+async function loadSample() {
+  // The single-file build (tools/build_single_file.py) embeds the capture, so the app also
+  // works from a file:// page where fetch() is unavailable.
+  const embedded = typeof window !== "undefined" ? window.__MAGCAL_SAMPLE__ : null;
+  if (embedded) {
+    applySample(embedded, "the embedded sample capture");
+    return;
+  }
+  for (const path of SAMPLE_PATHS) {
+    try {
+      const response = await fetch(path);
+      if (response.ok) {
+        applySample(await response.text(), path);
+        return;
+      }
+    } catch (error) {
+      // try the next location
+    }
+  }
+  setStatus("could not load the sample capture - paste your own capture, or open this page "
+    + "through `python tools/serve.py` (see the note at the top of the page)");
+}
+
+/** Load a capture into the textarea and align the expected field with it. */
+function applySample(text, source) {
+  ui["capture-text"].value = text;
+  ui.field.value = String(SAMPLE_FIELD);
+  clearError();
+  setStatus(`loaded ${source} - expected field set to ${SAMPLE_FIELD} microTesla`);
+}
+
+function readInto(file, target) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    ui[target].value = String(reader.result);
+    clearError();
+    setStatus(`loaded ${file.name} (${file.size} bytes)`);
+  };
+  reader.readAsText(file);
+}
+
+function wireDropzone() {
+  const zone = ui.dropzone;
+  ["dragenter", "dragover"].forEach((type) => zone.addEventListener(type, (event) => {
+    event.preventDefault();
+    zone.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach((type) => zone.addEventListener(type, () => {
+    zone.classList.remove("over");
+  }));
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const file = event.dataTransfer && event.dataTransfer.files[0];
+    if (file) {
+      readInto(file, "capture-text");
+    }
+  });
+  ui["file-input"].addEventListener("change", (event) => {
+    if (event.target.files[0]) {
+      readInto(event.target.files[0], "capture-text");
+    }
+  });
+}
+
+function wireEvents() {
+  wireDropzone();
+  ui["calibrate-button"].addEventListener("click", run);
+  ui["sample-button"].addEventListener("click", loadSample);
+  ui["clear-button"].addEventListener("click", () => {
+    ui["capture-text"].value = "";
+    ui["input-report"].textContent = "no capture loaded yet";
+    ui["result-panel"].hidden = true;
+    state = null;
+    clearError();
+    setStatus("ready");
+  });
+  ui["download-csv"].addEventListener("click", () => {
+    if (state) {
+      download("calibrated.csv", writeCalibratedCsv(state.calibrated));
+    }
+  });
+  ui["download-json"].addEventListener("click", () => {
+    if (state) {
+      download("calibration.json", state.text.record, "application/json");
+    }
+  });
+  ui["copy-c"].addEventListener("click", (event) => {
+    if (state) {
+      copyText(state.text.cCode, event.currentTarget);
+    }
+  });
+  ui["copy-esphome"].addEventListener("click", (event) => {
+    if (state) {
+      copyText(state.text.lambda, event.currentTarget);
+    }
+  });
+  ui["esphome-file"].addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    if (!file || !state) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const result = patchEsphomeYaml(String(reader.result), state.calibration);
+        download(`${file.name.replace(/\.ya?ml$/, "")}_calibrated.yaml`, result.text, "text/yaml");
+        ui["esphome-report"].textContent
+          = `replaced ${result.replacements} constants in ${file.name}`;
+      } catch (error) {
+        ui["esphome-report"].textContent = error.message;
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+wireEvents();
+setStatus("ready");
+document.body.dataset.app = "ready";
+
+
+window.__MAGCAL_SAMPLE__ = "33.1,98.3,571.2\n33.1,98.3,571.2\n33.1,98.3,571.2\n33.1,98.7,571.2\n33.5,98.3,571.2\n-3.0,94.0,569.4\n-6.1,93.5,568.5\n-27.8,86.6,566.8\n-35.2,84.0,565.9\n-50.5,77.0,564.6\n-58.7,72.2,563.3\n-67.4,67.0,562.5\n-67.4,66.6,562.5\n-68.3,66.1,562.0\n-83.1,55.2,560.3\n-91.8,47.9,559.4\n-105.7,32.6,557.7\n-109.2,28.3,557.2\n-119.6,13.5,555.9\n-125.3,4.8,555.1\n-136.6,-20.4,553.3\n-137.5,-22.6,552.9\n-140.9,-33.5,552.5\n-144.9,-47.9,552.0\n-147.9,-74.0,551.6\n-148.8,-81.3,551.6\n-147.9,-101.8,551.1\n-146.6,-115.3,551.1\n-139.2,-146.6,551.1\n-132.2,-165.3,550.7\n-124.0,-181.4,551.1\n-117.9,-191.0,551.1\n-105.7,-207.1,551.1\n-104.0,-209.2,551.1\n-91.3,-221.9,551.6\n-88.3,-224.9,551.6\n-70.5,-238.4,552.0\n-64.8,-242.3,552.0\n-40.9,-255.8,553.3\n-130.5,-169.7,550.7\n-65.7,-241.9,552.0\n-44.4,-254.0,552.9\n-19.1,-264.0,554.2\n-3.9,-268.4,555.1\n16.5,-272.7,555.9\n26.1,-273.6,556.4\n48.7,-274.5,557.2\n57.4,-274.5,557.7\n86.1,-271.0,558.5\n102.7,-267.1,559.4\n111.8,-264.0,559.8\n124.4,-259.3,560.7\n143.6,-248.8,562.5\n151.8,-244.0,562.9\n172.7,-228.8,564.2\n179.7,-221.9,565.1\n201.8,-193.6,566.8\n205.8,-187.5,567.2\n219.2,-157.9,566.8\n223.2,-144.9,566.8\n227.9,-124.4,566.4\n229.7,-106.1,565.9\n230.1,-97.0,565.9\n227.9,-62.6,565.5\n221.9,-38.3,566.8\n213.6,-15.7,567.7\n206.2,-1.3,568.1\n184.4,30.0,569.9\n168.3,46.5,570.7\n150.5,60.9,570.7\n139.6,68.3,570.7\n116.6,80.0,570.7\n102.7,85.7,569.9\n67.4,94.4,568.5\n57.0,95.7,568.1\n41.3,96.6,566.8\n32.6,96.6,566.4\n6.1,94.0,564.6\n-1.7,92.2,564.6\n-35.7,81.8,562.9\n-47.0,76.6,562.0\n-57.0,71.3,561.6\n-72.6,60.9,560.3\n-89.6,47.4,559.0\n-107.0,28.3,556.8\n-137.9,-29.6,553.3\n-145.3,-60.0,552.5\n-146.6,-98.7,552.0\n-140.9,-134.9,551.1\n-110.5,-198.8,549.4\n-79.2,-231.4,549.4\n-29.1,-260.1,551.1\n-4.8,-268.0,552.5\n67.0,-273.6,559.0\n86.6,-270.6,560.7\n137.5,-252.7,563.8\n161.8,-237.1,565.1\n198.4,-197.5,565.9\n214.9,-166.6,565.9\n227.1,-120.5,566.8\n228.4,-102.7,567.2\n221.9,-40.9,568.5\n210.5,-11.7,570.3\n182.7,31.3,572.9\n160.1,53.5,573.8\n119.6,78.7,572.9\n99.6,86.6,571.6\n44.8,96.6,567.2\n23.9,96.1,565.1\n-25.2,86.1,561.6\n-35.7,82.2,560.7\n-51.8,74.4,559.8\n-78.7,56.5,559.0\n-95.3,41.8,558.1\n-127.0,-2.6,555.1\n-139.2,-32.2,553.3\n-147.5,-80.9,551.1\n-146.2,-110.5,550.3\n-112.2,-197.9,551.1\n-43.9,-254.5,552.5\n82.2,-271.4,559.0\n138.8,-251.9,561.2\n229.2,-78.7,568.5\n201.4,6.1,572.5\n-26.1,85.3,561.2\n-122.7,5.2,556.4\n-126.6,-174.9,549.0\n-80.0,-230.6,550.7\n105.3,-265.8,559.0\n183.1,-216.6,564.2\n229.2,-96.1,568.5\n221.9,-40.0,571.2\n153.1,58.7,569.9\n87.4,90.9,568.1\n-30.0,84.4,565.1\n-140.5,-35.2,554.2\n40.9,-274.5,557.2\n144.9,-248.8,561.6\n221.9,-149.2,567.7\n227.5,-63.1,568.1\n127.5,74.4,568.1\n114.8,80.5,568.1\n97.9,87.0,568.1\n-10.0,91.3,565.9\n-117.0,17.0,555.1\n-147.5,-66.1,551.1\n54.4,-274.5,557.2\n203.1,-191.8,566.4\n11.3,96.1,565.1\n-143.1,-43.9,550.7\n174.0,-227.1,564.2\n219.7,-30.9,568.5\n-147.9,-94.4,551.6\n-80.0,-232.7,550.3\n224.0,-43.5,568.5\n177.9,37.4,572.0\n229.7,-74.0,567.2\n212.7,-173.1,562.0\n172.3,-227.1,561.2\n-45.2,-254.9,551.1\n-114.4,-199.2,550.3\n-120.1,20.4,556.8\n-80.5,61.8,560.3\n30.9,100.1,567.7\n97.9,89.6,572.9\n228.4,-65.7,567.2\n226.2,-134.0,565.5\n148.3,-244.9,561.2\n6.1,-270.1,553.8\n-113.1,-199.7,551.6\n-150.9,-95.3,552.5\n-48.3,81.8,560.7\n6.1,97.9,564.6\n-68.7,58.7,542.4\n-117.0,-179.7,531.6\n216.2,-147.9,545.1\n225.8,-97.4,542.9\n221.4,-112.7,542.0\n216.6,-45.2,537.7\n209.7,-157.5,538.1\n63.5,89.6,539.4\n-91.3,35.2,522.0\n-56.5,-233.6,512.0\n-24.4,79.6,527.2\n212.3,-38.3,528.1\n209.7,-31.8,527.2\n220.1,-97.0,525.9\n86.6,83.5,529.0\n-54.4,-234.0,511.1\n44.4,-258.8,508.1\n101.8,-249.3,513.3\n-134.0,-35.2,508.5\n219.2,-94.0,521.6\n97.0,80.9,529.4\n127.0,-239.7,513.7\n195.3,-178.4,520.3\n-60.0,65.7,517.7\n-138.8,-61.3,506.3\n218.8,-67.0,525.9\n65.7,88.7,524.6\n184.4,14.8,527.2\n189.2,7.8,525.9\n121.4,68.7,526.4\n-42.6,70.0,515.5\n-106.1,15.7,511.6\n-136.6,-70.9,505.0\n-127.9,-140.5,503.3\n-97.9,-194.9,503.3\n-19.1,-248.8,506.3\n-13.1,-268.8,559.0\n37.4,-277.1,563.3\n168.8,-235.3,568.1\n227.5,-134.9,568.5\n230.1,-121.8,568.5\n126.2,77.4,576.8\n32.2,97.9,571.2\n-42.6,80.5,566.4\n-71.8,63.5,565.1\n-148.8,-82.7,555.5\n-141.4,-140.9,554.2\n-63.9,-244.9,558.1\n-9.1,-268.4,560.3\n126.2,-258.8,565.9\n172.3,-229.2,568.5\n231.0,-96.1,574.2\n210.1,-7.0,576.8\n80.0,93.1,572.9\n-39.2,80.9,567.7\n-113.1,22.2,561.6\n-147.5,-64.4,558.1\n-47.4,-253.6,558.5\n53.9,-275.8,560.3\n203.6,-193.6,570.7\n230.6,-107.4,571.6\n126.6,75.7,574.2\n81.3,91.8,574.6\n10.0,95.7,572.5\n10.0,95.7,572.5\n10.0,95.7,572.5\n10.0,95.7,572.5\n10.0,95.3,572.5\n10.0,95.7,572.5\n10.0,95.7,572.5\n";
+</script>
+</body>
+</html>
