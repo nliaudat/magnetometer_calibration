@@ -47,6 +47,7 @@ jobs:
 
       - name: Build the site and check it in a browser (HTTP and file://)
         run: |
+          google-chrome --version || echo "google-chrome is not on PATH"
           python tools/build_site.py
           python tools/run_web_tests.py --all
 

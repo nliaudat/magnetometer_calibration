@@ -29,17 +29,35 @@ RESULTS_RE = re.compile(r'<pre id="results">(.*?)</pre>', re.DOTALL)
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.DOTALL)
 
 CANDIDATES = {
+    # Windows paths first, then the names Linux/macOS runners expose.  GitHub's ubuntu
+    # runners ship Google Chrome (`google-chrome`), but the same profile has to work on a
+    # Windows desktop, so both sets live here.
     "chrome": [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        "google-chrome",
+        "google-chrome-stable",
+        "/usr/bin/google-chrome",
+        "chromium",
+        "chromium-browser",
+        "chrome",
+    ],
+    "chromium": [
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     ],
     "msedge": [
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        "microsoft-edge",
+        "msedge",
     ],
-    "chromium": ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"],
 }
 
 
@@ -72,7 +90,9 @@ def run_browser(executable, url, timeout):
     """Load the page headless and return its DOM."""
     command = [
         executable, "--headless=new", "--disable-gpu", "--no-sandbox",
-        "--disable-extensions", "--virtual-time-budget=60000", "--dump-dom", url,
+        # /dev/shm is small in containers: without this a busy page can crash the renderer
+        "--disable-dev-shm-usage", "--disable-extensions",
+        "--virtual-time-budget=60000", "--dump-dom", url,
     ]
     completed = subprocess.run(command, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=timeout)
@@ -149,12 +169,14 @@ def check_offline_copy():
         sample = handle.read()
     with open(committed, "r", encoding="utf-8") as handle:
         current = handle.read()
-    if render_app(sample) == current:
-        return True, "%d kB, identical to a fresh build" % (os.path.getsize(committed) // 1024)
-    # The file is generated on one platform and checked on another (and git may hand out CRLF in
-    # one place and LF in the other), so compare the content, not the line endings.
-    if render_app(sample).replace("\r\n", "\n") == current.replace("\r\n", "\n"):
-        return True, "%d kB, identical to a fresh build" % (os.path.getsize(committed) // 1024)
+    fresh = render_app(sample)
+    size = "%d kB" % (os.path.getsize(committed) // 1024)
+    if fresh == current:
+        return True, "%s, identical to a fresh build" % size
+    # The file is generated on one platform and checked on another (git may hand out CRLF in one
+    # place and LF in the other), so compare the content, not the line endings.
+    if fresh.replace("\r\n", "\n") == current.replace("\r\n", "\n"):
+        return True, "%s, identical to a fresh build up to line endings" % size
     return False, "stale - run `python tools/build_site.py`"
 
 
@@ -290,8 +312,9 @@ def main(argv=None):
 
     executable = find_browser(options.browser)
     if executable is None:
-        print("no %s executable found; install one or run `node --test web/tests` instead"
-              % options.browser)
+        print("no %s executable found; tried: %s"
+              % (options.browser, ", ".join(CANDIDATES[options.browser])))
+        print("install one, or run `node --test web/tests` for the fixture checks alone")
         return 2
 
     if options.all_checks:
